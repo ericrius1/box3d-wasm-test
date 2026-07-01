@@ -157,6 +157,9 @@ export type Box3DEmscriptenModule = {
   _b3w_human_bone_count(): number;
   _b3w_human_set_velocity(humanHandle: number, vx: number, vy: number, vz: number): void;
   _b3w_human_apply_random_impulse(humanHandle: number, magnitude: number): void;
+  _b3w_set_hit_event_threshold(worldHandle: number, value: number): void;
+  _b3w_body_enable_hit_events(bodyHandle: number, enable: number): void;
+  _b3w_get_hit_events(worldHandle: number, outPtr: number, maxEvents: number): number;
   _b3w_get_world_count(): number;
 };
 
@@ -229,6 +232,27 @@ export type HumanOptions = {
   /** Joint spring damping ratio. Upstream default 0.7. */
   dampingRatio?: number;
 };
+
+/**
+ * A high-speed collision reported by the engine. Generated when two shapes
+ * collide faster than the world's hit event threshold and at least one body
+ * has hit events enabled.
+ */
+export type ContactHitEvent = {
+  /** Handle of the first body. 0 when the body is unknown to the wrapper. */
+  bodyA: number;
+  /** Handle of the second body. 0 when the body is unknown to the wrapper. */
+  bodyB: number;
+  /** Approximate world-space contact point. */
+  point: [number, number, number];
+  /** Contact normal pointing from bodyA to bodyB. */
+  normal: [number, number, number];
+  /** Speed the shapes approached at, in m/s. Always positive. */
+  approachSpeed: number;
+};
+
+/** Floats per hit event: bodyA bodyB px py pz nx ny nz approachSpeed. */
+const HIT_EVENT_STRIDE = 9;
 
 /** Floats per body in a TransformBatch read: px py pz qx qy qz qw awake. */
 export const TRANSFORM_STRIDE = 8;
@@ -307,6 +331,8 @@ export class PhysicsWorld {
   #module: Box3DEmscriptenModule;
   #disposed = false;
   #scratchPtr = 0;
+  #hitEventsPtr = 0;
+  #hitEventsCapacity = 0;
 
   constructor(module: Box3DEmscriptenModule, handle: number) {
     this.#module = module;
@@ -479,6 +505,48 @@ export class PhysicsWorld {
     this.#module._b3w_set_body_gravity_scale(bodyHandle, scale);
   }
 
+  /** Collision speed (m/s) required before hit events are generated. */
+  setHitEventThreshold(value: number) {
+    this.#module._b3w_set_hit_event_threshold(this.handle, value);
+  }
+
+  /** Opt a body into ContactHitEvent generation (off by default upstream). */
+  setBodyHitEvents(bodyHandle: number, enabled: boolean) {
+    this.#module._b3w_body_enable_hit_events(bodyHandle, enabled ? 1 : 0);
+  }
+
+  /**
+   * Hit events from the most recent step. Call between step() and the next
+   * step; each step replaces the previous buffer.
+   */
+  readHitEvents(maxEvents = 64): ContactHitEvent[] {
+    this.#assertLive();
+    if (this.#hitEventsCapacity < maxEvents) {
+      if (this.#hitEventsPtr !== 0) {
+        this.#module._free(this.#hitEventsPtr);
+      }
+      this.#hitEventsPtr = this.#module._malloc(maxEvents * HIT_EVENT_STRIDE * 4);
+      this.#hitEventsCapacity = maxEvents;
+    }
+
+    const count = this.#module._b3w_get_hit_events(this.handle, this.#hitEventsPtr, maxEvents);
+    const base = this.#hitEventsPtr >> 2;
+    const heap = this.#module.HEAPF32;
+    const events: ContactHitEvent[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const offset = base + i * HIT_EVENT_STRIDE;
+      events.push({
+        bodyA: heap[offset],
+        bodyB: heap[offset + 1],
+        point: [heap[offset + 2], heap[offset + 3], heap[offset + 4]],
+        normal: [heap[offset + 5], heap[offset + 6], heap[offset + 7]],
+        approachSpeed: heap[offset + 8]
+      });
+    }
+
+    return events;
+  }
+
   /** Local capsule shape of the body, or undefined when it has none. */
   getBodyCapsule(bodyHandle: number): CapsuleShape | undefined {
     const ptr = this.#scratch();
@@ -647,6 +715,12 @@ export class PhysicsWorld {
     if (this.#scratchPtr !== 0) {
       this.#module._free(this.#scratchPtr);
       this.#scratchPtr = 0;
+    }
+
+    if (this.#hitEventsPtr !== 0) {
+      this.#module._free(this.#hitEventsPtr);
+      this.#hitEventsPtr = 0;
+      this.#hitEventsCapacity = 0;
     }
 
     this.#module._b3w_destroy_world(this.handle);

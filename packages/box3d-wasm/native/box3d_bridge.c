@@ -68,6 +68,9 @@ static int b3w_alloc_body(int worldHandle, b3BodyId id)
 			s_bodies[i].worldHandle = worldHandle;
 			s_bodies[i].id = id;
 			s_nextBodyProbe = (i + 1) % B3W_MAX_BODIES;
+			// The handle rides in userData so contact events can map a
+			// b3BodyId back to its bridge handle without a slot scan.
+			b3Body_SetUserData(id, (void*)(intptr_t)(i + 1));
 			return i + 1;
 		}
 	}
@@ -781,4 +784,60 @@ void b3w_destroy_joint(int jointHandle)
 	}
 
 	s_joints[jointHandle - 1].used = false;
+}
+
+void b3w_set_hit_event_threshold(int worldHandle, float value)
+{
+	b3WorldId worldId;
+	if (!b3w_get_world(worldHandle, &worldId))
+	{
+		return;
+	}
+
+	b3World_SetHitEventThreshold(worldId, value);
+}
+
+void b3w_body_enable_hit_events(int bodyHandle, int enable)
+{
+	b3BodyId bodyId;
+	if (!b3w_get_body(bodyHandle, &bodyId))
+	{
+		return;
+	}
+
+	b3Body_EnableHitEvents(bodyId, enable != 0);
+}
+
+// Writes up to maxEvents contact hit events as 9 floats each:
+// bodyHandleA, bodyHandleB, px, py, pz, nx, ny, nz, approachSpeed.
+// Returns the number of events written. Events describe the most recent
+// completed step, so read them after stepping and before the next step.
+int b3w_get_hit_events(int worldHandle, float* out, int maxEvents)
+{
+	b3WorldId worldId;
+	if (out == 0 || maxEvents <= 0 || !b3w_get_world(worldHandle, &worldId))
+	{
+		return 0;
+	}
+
+	b3ContactEvents events = b3World_GetContactEvents(worldId);
+	int count = events.hitCount < maxEvents ? events.hitCount : maxEvents;
+	for (int i = 0; i < count; ++i)
+	{
+		const b3ContactHitEvent* hit = events.hitEvents + i;
+		b3BodyId bodyA = b3Shape_GetBody(hit->shapeIdA);
+		b3BodyId bodyB = b3Shape_GetBody(hit->shapeIdB);
+		float* entry = out + i * 9;
+		entry[0] = (float)(intptr_t)b3Body_GetUserData(bodyA);
+		entry[1] = (float)(intptr_t)b3Body_GetUserData(bodyB);
+		entry[2] = (float)hit->point.x;
+		entry[3] = (float)hit->point.y;
+		entry[4] = (float)hit->point.z;
+		entry[5] = hit->normal.x;
+		entry[6] = hit->normal.y;
+		entry[7] = hit->normal.z;
+		entry[8] = hit->approachSpeed;
+	}
+
+	return count;
 }

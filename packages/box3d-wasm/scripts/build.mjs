@@ -55,7 +55,10 @@ const exportedFunctions = [
   "_b3w_spawn_human",
   "_b3w_human_bone_count",
   "_b3w_human_set_velocity",
-  "_b3w_human_apply_random_impulse"
+  "_b3w_human_apply_random_impulse",
+  "_b3w_set_hit_event_threshold",
+  "_b3w_body_enable_hit_events",
+  "_b3w_get_hit_events"
 ];
 
 const exportedRuntimeMethods = ["HEAPF32", "HEAP32"];

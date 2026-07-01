@@ -50,6 +50,9 @@ export type Box3DEmscriptenModule = {
     _b3w_human_bone_count(): number;
     _b3w_human_set_velocity(humanHandle: number, vx: number, vy: number, vz: number): void;
     _b3w_human_apply_random_impulse(humanHandle: number, magnitude: number): void;
+    _b3w_set_hit_event_threshold(worldHandle: number, value: number): void;
+    _b3w_body_enable_hit_events(bodyHandle: number, enable: number): void;
+    _b3w_get_hit_events(worldHandle: number, outPtr: number, maxEvents: number): number;
     _b3w_get_world_count(): number;
 };
 export type BoxOptions = {
@@ -114,6 +117,23 @@ export type HumanOptions = {
     /** Joint spring damping ratio. Upstream default 0.7. */
     dampingRatio?: number;
 };
+/**
+ * A high-speed collision reported by the engine. Generated when two shapes
+ * collide faster than the world's hit event threshold and at least one body
+ * has hit events enabled.
+ */
+export type ContactHitEvent = {
+    /** Handle of the first body. 0 when the body is unknown to the wrapper. */
+    bodyA: number;
+    /** Handle of the second body. 0 when the body is unknown to the wrapper. */
+    bodyB: number;
+    /** Approximate world-space contact point. */
+    point: [number, number, number];
+    /** Contact normal pointing from bodyA to bodyB. */
+    normal: [number, number, number];
+    /** Speed the shapes approached at, in m/s. Always positive. */
+    approachSpeed: number;
+};
 /** Floats per body in a TransformBatch read: px py pz qx qy qz qw awake. */
 export declare const TRANSFORM_STRIDE = 8;
 /**
@@ -160,6 +180,15 @@ export declare class PhysicsWorld {
     setBodyAwake(bodyHandle: number, awake: boolean): void;
     /** 0 disables gravity for the body, 1 is normal. */
     setBodyGravityScale(bodyHandle: number, scale: number): void;
+    /** Collision speed (m/s) required before hit events are generated. */
+    setHitEventThreshold(value: number): void;
+    /** Opt a body into ContactHitEvent generation (off by default upstream). */
+    setBodyHitEvents(bodyHandle: number, enabled: boolean): void;
+    /**
+     * Hit events from the most recent step. Call between step() and the next
+     * step; each step replaces the previous buffer.
+     */
+    readHitEvents(maxEvents?: number): ContactHitEvent[];
     /** Local capsule shape of the body, or undefined when it has none. */
     getBodyCapsule(bodyHandle: number): CapsuleShape | undefined;
     /** Spawns the official Box3D samples ragdoll (14 capsule bones + joints). */

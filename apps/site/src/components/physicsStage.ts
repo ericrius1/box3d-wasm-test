@@ -481,13 +481,17 @@ export class PhysicsStage {
     this.#camera.position.copy(camPosition);
     this.#setupPostProcessing();
 
-    this.#orbit = new OrbitControls(this.#camera, this.#renderer.domElement);
-    this.#orbit.enableDamping = true;
-    this.#orbit.dampingFactor = 0.08;
-    this.#orbit.target.copy(camTarget);
-    this.#orbit.maxDistance = Math.max(40, camDistance * 1.8);
-    this.#orbit.minDistance = 3.5;
-    this.#orbit.update();
+    if (!this.#scenario.firstPerson) {
+      this.#orbit = new OrbitControls(this.#camera, this.#renderer.domElement);
+      this.#orbit.enableDamping = true;
+      this.#orbit.dampingFactor = 0.08;
+      this.#orbit.target.copy(camTarget);
+      this.#orbit.maxDistance = Math.max(40, camDistance * 1.8);
+      this.#orbit.minDistance = 3.5;
+      this.#orbit.update();
+    } else {
+      this.#camera.lookAt(camTarget);
+    }
 
     this.#stats = new Stats();
     this.#stats.showPanel(0);
@@ -504,8 +508,10 @@ export class PhysicsStage {
     this.#resizeObserver = new ResizeObserver(this.#resize);
     this.#resizeObserver.observe(this.#hostElement);
     window.addEventListener("keydown", this.#onKeydown);
-    this.#renderer.domElement.addEventListener("pointerdown", this.#onPointerDown);
-    this.#renderer.domElement.addEventListener("pointerup", this.#onPointerUp);
+    if (!this.#scenario.firstPerson) {
+      this.#renderer.domElement.addEventListener("pointerdown", this.#onPointerDown);
+      this.#renderer.domElement.addEventListener("pointerup", this.#onPointerUp);
+    }
 
     if (rendererBundle.warning) {
       this.#metricsElement.dataset.warning = rendererBundle.warning;
@@ -648,6 +654,7 @@ export class PhysicsStage {
       world,
       scene,
       camera: this.#camera!,
+      domElement: this.#renderer!.domElement,
       landmarkGroup,
       params: this.#params,
       material: (role) => materials.role(role),
@@ -1070,7 +1077,7 @@ export class PhysicsStage {
   }
 
   #frame = (now: number) => {
-    if (!this.#renderer || !this.#scene || !this.#camera || !this.#stats || !this.#orbit) {
+    if (!this.#renderer || !this.#scene || !this.#camera || !this.#stats) {
       return;
     }
 
@@ -1102,7 +1109,7 @@ export class PhysicsStage {
       this.#currentLandmarks.visible = Boolean(this.#params.showLandmarks);
     }
 
-    this.#orbit.update();
+    this.#orbit?.update();
     if (this.#postProcessing) {
       this.#postProcessing.render();
     } else if (this.#composer) {

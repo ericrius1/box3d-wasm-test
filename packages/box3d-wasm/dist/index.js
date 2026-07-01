@@ -3,6 +3,8 @@ export const BodyType = {
     Kinematic: 1,
     Dynamic: 2
 };
+/** Floats per hit event: bodyA bodyB px py pz nx ny nz approachSpeed. */
+const HIT_EVENT_STRIDE = 9;
 /** Floats per body in a TransformBatch read: px py pz qx qy qz qw awake. */
 export const TRANSFORM_STRIDE = 8;
 /**
@@ -66,6 +68,8 @@ export class PhysicsWorld {
     #module;
     #disposed = false;
     #scratchPtr = 0;
+    #hitEventsPtr = 0;
+    #hitEventsCapacity = 0;
     constructor(module, handle) {
         this.#module = module;
         this.handle = handle;
@@ -149,6 +153,43 @@ export class PhysicsWorld {
     /** 0 disables gravity for the body, 1 is normal. */
     setBodyGravityScale(bodyHandle, scale) {
         this.#module._b3w_set_body_gravity_scale(bodyHandle, scale);
+    }
+    /** Collision speed (m/s) required before hit events are generated. */
+    setHitEventThreshold(value) {
+        this.#module._b3w_set_hit_event_threshold(this.handle, value);
+    }
+    /** Opt a body into ContactHitEvent generation (off by default upstream). */
+    setBodyHitEvents(bodyHandle, enabled) {
+        this.#module._b3w_body_enable_hit_events(bodyHandle, enabled ? 1 : 0);
+    }
+    /**
+     * Hit events from the most recent step. Call between step() and the next
+     * step; each step replaces the previous buffer.
+     */
+    readHitEvents(maxEvents = 64) {
+        this.#assertLive();
+        if (this.#hitEventsCapacity < maxEvents) {
+            if (this.#hitEventsPtr !== 0) {
+                this.#module._free(this.#hitEventsPtr);
+            }
+            this.#hitEventsPtr = this.#module._malloc(maxEvents * HIT_EVENT_STRIDE * 4);
+            this.#hitEventsCapacity = maxEvents;
+        }
+        const count = this.#module._b3w_get_hit_events(this.handle, this.#hitEventsPtr, maxEvents);
+        const base = this.#hitEventsPtr >> 2;
+        const heap = this.#module.HEAPF32;
+        const events = [];
+        for (let i = 0; i < count; i += 1) {
+            const offset = base + i * HIT_EVENT_STRIDE;
+            events.push({
+                bodyA: heap[offset],
+                bodyB: heap[offset + 1],
+                point: [heap[offset + 2], heap[offset + 3], heap[offset + 4]],
+                normal: [heap[offset + 5], heap[offset + 6], heap[offset + 7]],
+                approachSpeed: heap[offset + 8]
+            });
+        }
+        return events;
     }
     /** Local capsule shape of the body, or undefined when it has none. */
     getBodyCapsule(bodyHandle) {
@@ -259,6 +300,11 @@ export class PhysicsWorld {
         if (this.#scratchPtr !== 0) {
             this.#module._free(this.#scratchPtr);
             this.#scratchPtr = 0;
+        }
+        if (this.#hitEventsPtr !== 0) {
+            this.#module._free(this.#hitEventsPtr);
+            this.#hitEventsPtr = 0;
+            this.#hitEventsCapacity = 0;
         }
         this.#module._b3w_destroy_world(this.handle);
         this.#disposed = true;

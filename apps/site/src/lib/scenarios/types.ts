@@ -72,6 +72,8 @@ export type ScenarioContext = {
   world: PhysicsWorld;
   scene: THREE.Scene;
   camera: THREE.Camera;
+  /** Renderer canvas — pointer lock, scenario-owned input, and overlay mounting. */
+  domElement: HTMLElement;
   landmarkGroup: THREE.Group;
   params: ScenarioParams;
   material(role: MaterialRole): THREE.Material;
@@ -165,6 +167,11 @@ export type ScenarioDefinition = {
   accent: string;
   category: ScenarioCategory;
   visuals?: ScenarioVisuals;
+  /**
+   * The scenario drives the camera itself (e.g. pointer-lock FPS). The stage
+   * skips OrbitControls and its click-to-explode pointer handling.
+   */
+  firstPerson?: boolean;
   hint?: string;
   defaults: ScenarioParams;
   controls: ControlFolder[];
