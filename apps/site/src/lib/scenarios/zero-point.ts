@@ -51,7 +51,7 @@ export const zeropointScenario: ScenarioDefinition = {
     background: "#04060d",
     fog: { color: "#04060d", near: 26, far: 92 },
     grid: false,
-    bloom: { strength: 0.85, radius: 0.5, threshold: 0.5 }
+    bloom: { strength: 0.35, radius: 0.1, threshold: 0.5 }
   },
   defaults: {
     crates: 34,
@@ -115,17 +115,22 @@ export const zeropointScenario: ScenarioDefinition = {
     const world = ctx.world;
     world.setHitEventThreshold(HIT_EVENT_THRESHOLD);
 
+    // The stage's night preset is too dark for gameplay readability at
+    // eye level — lift the floor with a cool fill.
+    const fill = new THREE.HemisphereLight(0x4a5f8a, 0x232a38, 2.2);
+    ctx.scene.add(fill);
+
     // ---------------------------------------------------------------- arena
     ctx.addBox({
       type: BodyType.Static,
       position: [0, -0.5, 0],
       halfExtents: [ARENA_HALF + 3, 0.5, ARENA_HALF + 3],
-      material: ctx.colorMaterial("#161b28", { roughness: 0.9, metalness: 0.08 }),
+      material: ctx.colorMaterial("#222a3d", { roughness: 0.85, metalness: 0.1 }),
       friction: 0.8,
       receiveShadow: true
     });
 
-    const wallMaterial = ctx.colorMaterial("#1d2434", { roughness: 0.7, metalness: 0.3 });
+    const wallMaterial = ctx.colorMaterial("#2b3550", { roughness: 0.65, metalness: 0.3 });
     const trimMaterial = new THREE.MeshBasicMaterial({ color: 0x2fbde8 });
     const wallSpecs: { position: Vec3; halfExtents: Vec3 }[] = [
       { position: [0, WALL_HEIGHT / 2, -ARENA_HALF - 0.6], halfExtents: [ARENA_HALF + 1.2, WALL_HEIGHT / 2, 0.6] },
@@ -165,7 +170,7 @@ export const zeropointScenario: ScenarioDefinition = {
         const tip = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 8), pylonTipMaterial);
         tip.position.set(x, 4.45, z);
         ctx.scene.add(tip);
-        const glow = new THREE.PointLight(0x58c8f2, 26, 17, 1.8);
+        const glow = new THREE.PointLight(0x58c8f2, 70, 30, 1.6);
         glow.position.set(x, 4.3, z);
         ctx.scene.add(glow);
       }
