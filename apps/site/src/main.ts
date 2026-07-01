@@ -14,13 +14,15 @@ import {
 import { PhysicsStage } from "./components/physicsStage";
 import {
   exampleScenarios,
+  GITHUB_REPO,
   heroScenario,
   scenarioCategories,
+  scenarioSourceUrl,
   type ScenarioDefinition
 } from "./lib/scenarios";
 import "./styles.css";
 
-const GITHUB_URL = "https://github.com/ericrius1/box3d-wasm-test";
+const GITHUB_URL = GITHUB_REPO;
 const NPM_URL = "https://www.npmjs.com/package/box3d-wasm";
 const BOX3D_REPO_URL = "https://github.com/erincatto/box3d";
 const BOX3D_SITE_URL = "https://box2d.org/";
@@ -182,7 +184,7 @@ function examplePageMarkup(scenario: ScenarioDefinition) {
           <p>${escapeHtml(scenario.description)}</p>
           <div class="info-actions">
             ${internalLink("/examples", "button", `${icon("arrow-right")}All examples`)}
-            ${externalLink(GITHUB_URL, "button button--ghost", `${icon("github")}Source`)}
+            ${externalLink(scenarioSourceUrl(scenario), "button button--ghost", `${icon("github")}Source`)}
           </div>
           <pre class="code-sample"><code>${escapeHtml(codeSnippet(scenario))}</code></pre>
         </aside>

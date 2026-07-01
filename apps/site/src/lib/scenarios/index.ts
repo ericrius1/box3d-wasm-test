@@ -1,0 +1,68 @@
+import type { ScenarioCategory } from "./types";
+import { landingLabScenario } from "./landing-lab";
+import { stackfallScenario } from "./stackfall";
+import { wreckingballScenario } from "./wrecking-ball";
+import { bowlinglaneScenario } from "./bowling-lane";
+import { pinballwellScenario } from "./pinball-well";
+import { blastlabScenario } from "./blast-lab";
+import { gravitychamberScenario } from "./gravity-chamber";
+import { pyramidcrushScenario } from "./pyramid-crush";
+import { spherestormScenario } from "./sphere-storm";
+import { sampleboxstackScenario } from "./sample-box-stack";
+import { samplejengaScenario } from "./sample-jenga";
+import { sampledominoesScenario } from "./sample-dominoes";
+import { samplerestitutionScenario } from "./sample-restitution";
+import { samplebouncehouseScenario } from "./sample-bounce-house";
+import { sampledistancechainScenario } from "./sample-distance-chain";
+import { sampleragdollsScenario } from "./sample-ragdolls";
+
+export * from "./types";
+export * from "./helpers";
+
+export const heroScenario = landingLabScenario;
+
+export const exampleScenarios = [
+  stackfallScenario,
+  wreckingballScenario,
+  bowlinglaneScenario,
+  pinballwellScenario,
+  blastlabScenario,
+  gravitychamberScenario,
+  pyramidcrushScenario,
+  spherestormScenario,
+  sampleboxstackScenario,
+  samplejengaScenario,
+  sampledominoesScenario,
+  samplerestitutionScenario,
+  samplebouncehouseScenario,
+  sampledistancechainScenario,
+  sampleragdollsScenario
+];
+
+export const scenarioCategories: { id: ScenarioCategory; title: string; blurb: string }[] = [
+  {
+    id: "fun",
+    title: "Fun & interactive",
+    blurb: "Playable scenes built around one physics behavior each — joints, restitution, explosions, and gravity."
+  },
+  {
+    id: "samples",
+    title: "Official Box3D samples",
+    blurb: "Direct ports of scenes from the upstream Box3D samples app — same bodies, joints, and parameters, including the original 14-bone ragdoll running unmodified in WASM."
+  },
+  {
+    id: "performance",
+    title: "Performance & stress",
+    blurb: "Benchmarks that push body counts with instanced rendering and batched WASM transform streaming."
+  }
+];
+
+export const allScenarios = [heroScenario, ...exampleScenarios];
+
+
+export const GITHUB_REPO = "https://github.com/ericrius1/box3d-wasm-test";
+export const GITHUB_BRANCH = "main";
+
+export function scenarioSourceUrl(scenario: { id: string }): string {
+  return `${GITHUB_REPO}/blob/${GITHUB_BRANCH}/apps/site/src/lib/scenarios/${scenario.id}.ts`;
+}
