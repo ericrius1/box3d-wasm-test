@@ -216,19 +216,19 @@ function createMaterials(accent: string, backend: RendererBackend) {
   };
 }
 
-function addLights(scene: THREE.Scene) {
+function addLights(scene: THREE.Scene, extent = 14) {
   scene.add(new THREE.HemisphereLight(0xbfe4de, 0x38453f, 0.82));
 
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
-  key.position.set(4.5, 8, 4.2);
+  key.position.set(4.5, 8, 4.2).normalize().multiplyScalar(Math.max(10, extent));
   key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.camera.left = -14;
-  key.shadow.camera.right = 14;
-  key.shadow.camera.top = 14;
-  key.shadow.camera.bottom = -14;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.left = -extent;
+  key.shadow.camera.right = extent;
+  key.shadow.camera.top = extent;
+  key.shadow.camera.bottom = -extent;
   key.shadow.camera.near = 0.5;
-  key.shadow.camera.far = 34;
+  key.shadow.camera.far = Math.max(34, extent * 3.4);
   scene.add(key);
 
   const rim = new THREE.DirectionalLight(0x98d8ff, 1.0);
@@ -433,16 +433,20 @@ export class PhysicsStage {
     this.#hostElement.appendChild(this.#renderer.domElement);
 
     this.#scene = new THREE.Scene();
-    this.#scene.fog = new THREE.Fog(0x101514, 14, 30);
+    // Scale fog to the scenario's framing so far cameras don't fog the scene out.
+    const camPosition = new THREE.Vector3(...this.#scenario.camera.position);
+    const camTarget = new THREE.Vector3(...this.#scenario.camera.target);
+    const camDistance = camPosition.distanceTo(camTarget);
+    this.#scene.fog = new THREE.Fog(0x101514, Math.max(14, camDistance * 1.1), Math.max(30, camDistance * 2.4));
 
-    this.#camera = new THREE.PerspectiveCamera(this.#scenario.camera.fov ?? 43, 1, 0.05, 120);
-    this.#camera.position.set(...this.#scenario.camera.position);
+    this.#camera = new THREE.PerspectiveCamera(this.#scenario.camera.fov ?? 43, 1, 0.05, 200);
+    this.#camera.position.copy(camPosition);
 
     this.#orbit = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#orbit.enableDamping = true;
     this.#orbit.dampingFactor = 0.08;
-    this.#orbit.target.set(...this.#scenario.camera.target);
-    this.#orbit.maxDistance = 40;
+    this.#orbit.target.copy(camTarget);
+    this.#orbit.maxDistance = Math.max(40, camDistance * 1.8);
     this.#orbit.minDistance = 3.5;
     this.#orbit.update();
 
@@ -590,6 +594,7 @@ export class PhysicsStage {
           density: options.density,
           friction: options.friction,
           restitution: options.restitution,
+          rollingResistance: options.rollingResistance,
           bullet: options.bullet
         });
         if (options.rotation) {
@@ -833,7 +838,9 @@ export class PhysicsStage {
       disposeObject(child);
     }
 
-    addLights(this.#scene);
+    const camPosition = new THREE.Vector3(...this.#scenario.camera.position);
+    const camTarget = new THREE.Vector3(...this.#scenario.camera.target);
+    addLights(this.#scene, Math.max(14, camPosition.distanceTo(camTarget) * 0.8));
     this.#scene.add(createPanelGrid());
 
     const materials = createMaterials(this.#scenario.accent, this.#backend);

@@ -71,6 +71,7 @@ export type ScenarioContext = {
     density?: number;
     friction?: number;
     restitution?: number;
+    rollingResistance?: number;
     bullet?: boolean;
     castShadow?: boolean;
     receiveShadow?: boolean;
@@ -107,6 +108,7 @@ export type ScenarioContext = {
     halfExtents: Vec3;
     material: THREE.Material;
     position: (index: number) => Vec3;
+    rotation?: (index: number) => Quat;
     density?: number;
     friction?: number;
     restitution?: number;
@@ -121,6 +123,10 @@ export type ScenarioContext = {
     restitution?: number;
     rollingResistance?: number;
   }): InstancedBodies;
+  addHuman(
+    position: Vec3,
+    options?: HumanOptions & { material?: (boneIndex: number) => THREE.Material }
+  ): { human: number; bodies: SimBody[] };
   addLandmarkSphere(position: Vec3, radius: number, color: string): void;
   addLandmarkLine(from: Vec3, to: Vec3, color: string): void;
 };
@@ -1442,6 +1448,651 @@ export const exampleScenarios: ScenarioDefinition[] = [
         })
       };
     }
+  },
+  {
+    id: "sample-box-stack",
+    title: "Box Stack",
+    eyebrow: "Box3D sample · Stacking",
+    deck: "The upstream Box Stack sample: forty cubes dropped into a single tall column.",
+    description:
+      "A direct port of the official Stacking / Box Stack sample: unit cubes with rolling resistance 0.1 spawn in a spaced column and settle into a stable stack, exactly as in the native samples app.",
+    accent: "#f2b544",
+    category: "samples",
+    hint: "Click the stack to blast it apart",
+    defaults: {
+      count: 40,
+      paused: false,
+      showLandmarks: false
+    },
+    controls: [
+      {
+        title: "Stack",
+        controls: [{ key: "count", label: "Cubes", min: 5, max: 40, step: 1 }]
+      },
+      baseDebugControls
+    ],
+    actions: [{ id: "reset", title: "Rebuild stack" }],
+    camera: {
+      position: [24, 22, 34],
+      target: [0, 12, 0],
+      fov: 42
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      // Upstream: AddGroundBox(40), cubes a=0.5 at y = 1.5a + 2.5a*i.
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [20, 0.5, 20],
+        material: ctx.material("ground"),
+        friction: 0.6,
+        receiveShadow: true
+      });
+
+      const count = Math.round(numberParam(ctx.params, "count"));
+      const a = 0.5;
+      const cubes: SimBody[] = [];
+      for (let i = 0; i < count; i += 1) {
+        cubes.push(
+          ctx.addBox({
+            type: BodyType.Dynamic,
+            position: [0, 1.5 * a + 2.5 * a * i, 0],
+            halfExtents: [a, a, a],
+            material: i % 3 === 0 ? ctx.material("accent") : i % 3 === 1 ? ctx.material("primary") : ctx.material("secondary"),
+            density: 1,
+            rollingResistance: 0.1
+          })
+        );
+      }
+
+      ctx.addLandmarkLine([0, 0, 0], [0, 1.5 * a + 2.5 * a * count, 0], "#f2b544");
+
+      let standing = count;
+      return {
+        actions: {
+          reset: () => undefined
+        },
+        update: () => {
+          standing = 0;
+          for (const cube of cubes) {
+            const p = cube.transform.position;
+            if (Math.abs(p[0]) < 1.2 && Math.abs(p[2]) < 1.2) {
+              standing += 1;
+            }
+          }
+        },
+        metrics: () => ({
+          Cubes: count,
+          "In column": standing
+        })
+      };
+    }
+  },
+  {
+    id: "sample-jenga",
+    title: "Jenga Stack",
+    eyebrow: "Box3D sample · Stacking",
+    deck: "The upstream Jenga Stack: alternating long boxes, two per level, ready to topple.",
+    description:
+      "A direct port of the official Stacking / Jenga Stack sample: 2.5 x 0.25 x 0.25 boxes laid in alternating orientations, two per level. Pull pieces out with clicks and see how long the tower survives.",
+    accent: "#d8705f",
+    category: "samples",
+    hint: "Click a piece to knock it out of the tower",
+    defaults: {
+      levels: 20,
+      paused: false,
+      showLandmarks: false
+    },
+    controls: [
+      {
+        title: "Tower",
+        controls: [{ key: "levels", label: "Levels", min: 6, max: 32, step: 1 }]
+      },
+      baseDebugControls
+    ],
+    actions: [{ id: "reset", title: "Rebuild tower" }],
+    camera: {
+      position: [14, 12, 14],
+      target: [0, 5, 0],
+      fov: 42
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [16, 0.5, 16],
+        material: ctx.material("ground"),
+        friction: 0.7,
+        receiveShadow: true
+      });
+
+      const levels = Math.round(numberParam(ctx.params, "levels"));
+      const half: Vec3 = [2.5, 0.25, 0.25];
+      const pieces: SimBody[] = [];
+      const halfPi = Math.PI / 2;
+
+      for (let i = 0; i < levels; i += 1) {
+        // Upstream: even levels sit at ±x rotated 90°, odd levels at ±z unrotated.
+        const rotated = (i & 1) === 0;
+        const alpha = rotated ? halfPi : 0;
+        const rotation: Quat = [0, Math.sin(alpha / 2), 0, Math.cos(alpha / 2)];
+        const x = rotated ? 1.75 : 0;
+        const z = rotated ? 0 : 1.75;
+        const y = 0.5 * i + 0.25;
+        const material = i % 2 === 0 ? ctx.material("secondary") : ctx.material("primary");
+
+        pieces.push(
+          ctx.addBox({
+            type: BodyType.Dynamic,
+            position: [x, y, z],
+            halfExtents: half,
+            material,
+            rotation,
+            density: 1,
+            rollingResistance: 0.01
+          }),
+          ctx.addBox({
+            type: BodyType.Dynamic,
+            position: [-x, y, -z],
+            halfExtents: half,
+            material,
+            rotation,
+            density: 1,
+            rollingResistance: 0.01
+          })
+        );
+      }
+
+      let standing = pieces.length;
+      return {
+        actions: {
+          reset: () => undefined
+        },
+        update: () => {
+          standing = 0;
+          for (const piece of pieces) {
+            const p = piece.transform.position;
+            const d = Math.hypot(p[0] - piece.origin[0], p[1] - piece.origin[1], p[2] - piece.origin[2]);
+            if (d < 0.4) {
+              standing += 1;
+            }
+          }
+        },
+        metrics: () => ({
+          Pieces: pieces.length,
+          Standing: standing
+        })
+      };
+    }
+  },
+  {
+    id: "sample-dominoes",
+    title: "Dominoes",
+    eyebrow: "Box3D sample · Stacking",
+    deck: "The upstream Dominoes sample: concentric spiral rings of dominoes falling in chains.",
+    description:
+      "A direct port of the official Stacking / Dominoes sample: rings of thin boxes placed every two degrees with a slight inward spiral, toppled by a single impulse per ring. Instanced rendering keeps hundreds of dominoes at one draw call.",
+    accent: "#8fbf49",
+    category: "samples",
+    hint: "Hit Topple, or click a domino to start a chain anywhere",
+    defaults: {
+      rings: 3,
+      paused: false,
+      showLandmarks: false
+    },
+    controls: [
+      {
+        title: "Rings",
+        controls: [{ key: "rings", label: "Ring count", min: 1, max: 8, step: 1 }]
+      },
+      baseDebugControls
+    ],
+    actions: [
+      { id: "topple", title: "Topple" },
+      { id: "reset", title: "Reset dominoes" }
+    ],
+    camera: {
+      position: [0, 22, 30],
+      target: [0, 0, 0],
+      fov: 42
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      const rings = Math.round(numberParam(ctx.params, "rings"));
+      const maxRadius = 7 + 1.1 * rings;
+
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [maxRadius + 4, 0.5, maxRadius + 4],
+        material: ctx.material("ground"),
+        friction: 0.6,
+        receiveShadow: true
+      });
+
+      // Upstream: per ring, a domino every 2 degrees with a slight inward
+      // spiral so each loop hands the chain to the next ring.
+      const positions: Vec3[] = [];
+      const rotations: Quat[] = [];
+      const firstOfRing: number[] = [];
+      const degToRad = Math.PI / 180;
+      for (let ring = 0; ring < rings; ring += 1) {
+        const radius = 7 + 1.1 * ring;
+        firstOfRing.push(positions.length);
+        for (let alpha = 0; alpha <= 360; alpha += 2) {
+          const angle = alpha * degToRad;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const inward = alpha / 630;
+          positions.push([radius * cos - inward * cos, 0.8, radius * sin - inward * sin]);
+          const half = -angle / 2;
+          rotations.push([0, Math.sin(half), 0, Math.cos(half)]);
+        }
+      }
+
+      const dominoes = ctx.addInstancedBoxes({
+        count: positions.length,
+        halfExtents: [0.2, 0.8, 0.05],
+        material: ctx.material("accent"),
+        position: (index) => positions[index],
+        rotation: (index) => rotations[index],
+        density: 1,
+        friction: 0.55
+      });
+
+      let topples = 0;
+      const topple = () => {
+        for (const start of firstOfRing) {
+          const handle = dominoes.bodies[start];
+          const p = positions[start];
+          // Upstream impulse: (0, 0, 25) applied at the top of the first domino.
+          ctx.world.applyImpulseAtPoint(handle, [0, 0, 25], [p[0], p[1] + 0.8, p[2]]);
+        }
+        topples += 1;
+      };
+
+      ctx.addLandmarkLine([7, 0.05, 0], [maxRadius, 0.05, 0], "#8fbf49");
+
+      return {
+        actions: {
+          topple,
+          reset: () => undefined
+        },
+        metrics: () => ({
+          Dominoes: positions.length,
+          Rings: rings,
+          Topples: topples
+        })
+      };
+    }
+  },
+  {
+    id: "sample-restitution",
+    title: "Restitution Array",
+    eyebrow: "Box3D sample · Shapes",
+    deck: "The upstream Restitution sample: a row of spheres with bounce factors from 0 to 1.",
+    description:
+      "A direct port of the official Shapes / Restitution sample: identical spheres drop from the same height with restitution stepping evenly from 0 to 1 across the row, making the coefficient's meaning obvious at a glance.",
+    accent: "#30b8e8",
+    category: "samples",
+    defaults: {
+      count: 10,
+      dropHeight: 20,
+      paused: false,
+      showLandmarks: true
+    },
+    controls: [
+      {
+        title: "Array",
+        controls: [
+          { key: "count", label: "Spheres", min: 3, max: 20, step: 1 },
+          { key: "dropHeight", label: "Drop height", min: 5, max: 40, step: 1 }
+        ]
+      },
+      baseDebugControls
+    ],
+    actions: [{ id: "reset", title: "Drop again" }],
+    camera: {
+      position: [0, 12, 30],
+      target: [0, 7, 0],
+      fov: 44
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      const count = Math.round(numberParam(ctx.params, "count"));
+      const dropHeight = numberParam(ctx.params, "dropHeight");
+
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [count + 4, 0.5, 8],
+        material: ctx.material("ground"),
+        friction: 0.6,
+        receiveShadow: true
+      });
+
+      // Upstream: restitution += 1/(count-1) per sphere, x spacing 2.
+      const spheres: SimBody[] = [];
+      const dr = 1 / (count > 1 ? count - 1 : 1);
+      let x = -(count - 1);
+      let restitution = 0;
+      for (let i = 0; i < count; i += 1) {
+        spheres.push(
+          ctx.addSphere({
+            type: BodyType.Dynamic,
+            position: [x, dropHeight, 0],
+            radius: 0.5,
+            material: i === count - 1 ? ctx.material("reward") : ctx.material("accent"),
+            density: 1,
+            restitution
+          })
+        );
+        restitution += dr;
+        x += 2;
+      }
+
+      ctx.addLandmarkLine([-(count - 1) - 1, 0.05, 0], [count - 1 + 1, 0.05, 0], "#30b8e8");
+      ctx.addLandmarkLine([-(count - 1), dropHeight, 0], [count - 1, dropHeight, 0], "#f4cf4d");
+
+      let maxHeights = new Array(count).fill(0);
+      return {
+        actions: {
+          reset: () => undefined
+        },
+        update: () => {
+          for (let i = 0; i < spheres.length; i += 1) {
+            const speed = ctx.world.getBodySpeed(spheres[i].body);
+            const y = spheres[i].transform.position[1];
+            if (speed < 0.5 && y > maxHeights[i]) {
+              maxHeights[i] = y;
+            }
+          }
+        },
+        metrics: () => ({
+          Spheres: count,
+          "Restitution range": "0 → 1"
+        })
+      };
+    }
+  },
+  {
+    id: "sample-bounce-house",
+    title: "Bounce House",
+    eyebrow: "Box3D sample · Continuous",
+    deck: "The upstream Bounce House: a zero-gravity ball ricocheting at high speed forever.",
+    description:
+      "A direct port of the official Continuous / Bounce House sample: a frictionless, perfectly elastic sphere with zero gravity scale ricochets around a sealed room at up to 120 m/s — a torture test for continuous collision detection.",
+    accent: "#e96368",
+    category: "samples",
+    hint: "Click walls to shove the ball with a shockwave",
+    defaults: {
+      speed: 60,
+      gravityScale: 0,
+      paused: false,
+      showLandmarks: false
+    },
+    controls: [
+      {
+        title: "Ball",
+        controls: [
+          { key: "speed", label: "Launch speed", min: 20, max: 120, step: 5 },
+          { key: "gravityScale", label: "Gravity scale", min: 0, max: 1, step: 0.05 }
+        ]
+      },
+      baseDebugControls
+    ],
+    actions: [
+      { id: "launch", title: "Relaunch ball" },
+      { id: "reset", title: "Reset room" }
+    ],
+    camera: {
+      position: [17, 14, 17],
+      target: [0, 4, 0],
+      fov: 42
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      // Upstream: 20x20 room, walls 10 high and 0.1 thick.
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -1, 0],
+        halfExtents: [10, 1, 10],
+        material: ctx.material("ground"),
+        friction: 0,
+        restitution: 1,
+        receiveShadow: true
+      });
+      ctx.addBox({ type: BodyType.Static, position: [10, 5, 0], halfExtents: [0.1, 5, 10], material: ctx.material("glass"), friction: 0, restitution: 1, castShadow: false });
+      ctx.addBox({ type: BodyType.Static, position: [-10, 5, 0], halfExtents: [0.1, 5, 10], material: ctx.material("glass"), friction: 0, restitution: 1, castShadow: false });
+      ctx.addBox({ type: BodyType.Static, position: [0, 5, -10], halfExtents: [10, 5, 0.1], material: ctx.material("glass"), friction: 0, restitution: 1, castShadow: false });
+      ctx.addBox({ type: BodyType.Static, position: [0, 5, 10], halfExtents: [10, 5, 0.1], material: ctx.material("glass"), friction: 0, restitution: 1, castShadow: false });
+
+      const ball = ctx.addSphere({
+        type: BodyType.Dynamic,
+        position: [-8, 4, 0],
+        radius: 0.5,
+        material: ctx.material("danger"),
+        density: 1,
+        friction: 0,
+        restitution: 1,
+        rollingResistance: 0,
+        bullet: true
+      });
+      ctx.world.setBodyGravityScale(ball.body, numberParam(ctx.params, "gravityScale"));
+
+      const launch = () => {
+        const speed = numberParam(ctx.params, "speed");
+        ctx.world.setBodyGravityScale(ball.body, numberParam(ctx.params, "gravityScale"));
+        ctx.world.setBodyVelocity(ball.body, [speed, 0, speed], [0, 0, 0]);
+      };
+      launch();
+
+      return {
+        actions: {
+          launch,
+          reset: () => undefined
+        },
+        metrics: () => ({
+          "Ball speed": formatSpeed(ctx.world.getBodySpeed(ball.body))
+        })
+      };
+    }
+  },
+  {
+    id: "sample-distance-chain",
+    title: "Distance Joint",
+    eyebrow: "Box3D sample · Joints",
+    deck: "The upstream Distance Joint sample: a hanging chain of dense spheres on tunable springs.",
+    description:
+      "A direct port of the official Joints / Distance Joint sample: dense spheres linked by unit-length distance joints hang from a fixed anchor. Turn the spring stiffness down to zero for a rigid rope, or up for a slinky.",
+    accent: "#c98bf2",
+    category: "samples",
+    hint: "Click the chain to swing it",
+    defaults: {
+      count: 12,
+      hertz: 5,
+      dampingRatio: 0.5,
+      springs: true,
+      paused: false,
+      showLandmarks: true
+    },
+    controls: [
+      {
+        title: "Chain",
+        controls: [
+          { key: "count", label: "Links", min: 1, max: 30, step: 1 },
+          { key: "springs", label: "Springs" },
+          { key: "hertz", label: "Spring hertz", min: 0.5, max: 15, step: 0.5 },
+          { key: "dampingRatio", label: "Damping", min: 0, max: 2, step: 0.05 }
+        ]
+      },
+      baseDebugControls
+    ],
+    actions: [
+      { id: "swing", title: "Swing chain" },
+      { id: "reset", title: "Reset chain" }
+    ],
+    camera: {
+      position: [3, 16, 22],
+      target: [4, 14, 0],
+      fov: 44
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      const count = Math.round(numberParam(ctx.params, "count"));
+      const useSprings = boolParam(ctx.params, "springs");
+      const hertz = numberParam(ctx.params, "hertz");
+      const dampingRatio = numberParam(ctx.params, "dampingRatio");
+      const length = 1;
+      const yOffset = 20;
+
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [12, 0.5, 8],
+        material: ctx.material("ground"),
+        friction: 0.6,
+        receiveShadow: true
+      });
+
+      const anchor = ctx.addBox({
+        type: BodyType.Static,
+        position: [0, yOffset, 0],
+        halfExtents: [0.3, 0.3, 0.3],
+        material: ctx.material("wall")
+      });
+
+      // Upstream: sphere r=0.25 density 20, bodies at x = length * (i+1).
+      const links: SimBody[] = [];
+      let previous = anchor;
+      for (let i = 0; i < count; i += 1) {
+        const link = ctx.addSphere({
+          type: BodyType.Dynamic,
+          position: [length * (i + 1), yOffset, 0],
+          radius: 0.25,
+          material: i === count - 1 ? ctx.material("reward") : ctx.material("primary"),
+          density: 20
+        });
+        ctx.world.createDistanceJoint(
+          previous.body,
+          link.body,
+          [length * i, yOffset, 0],
+          [length * (i + 1), yOffset, 0],
+          {
+            length,
+            hertz: useSprings ? hertz : 0,
+            dampingRatio
+          }
+        );
+        links.push(link);
+        previous = link;
+      }
+
+      ctx.addLandmarkSphere([0, yOffset, 0], 0.15, "#f4cf4d");
+
+      return {
+        actions: {
+          swing: () => {
+            const tip = links[links.length - 1];
+            if (tip) {
+              ctx.world.applyImpulse(tip.body, [0, 0, 60]);
+            }
+          },
+          reset: () => undefined
+        },
+        metrics: () => ({
+          Links: count,
+          Springs: useSprings ? `${hertz.toFixed(1)} Hz` : "rigid",
+          "Tip speed": formatSpeed(links.length ? ctx.world.getBodySpeed(links[links.length - 1].body) : 0)
+        })
+      };
+    }
+  },
+  {
+    id: "sample-ragdolls",
+    title: "Ragdoll Pile",
+    eyebrow: "Box3D sample · Ragdoll",
+    deck: "The upstream ragdoll: 14 capsule bones with cone and twist limits, dropped in a pile.",
+    description:
+      "The official Box3D samples human runs unmodified inside the WASM module — the vendored shared/human.c builds each ragdoll from 14 capsule bones, spherical joints with cone and twist limits, joint friction, and self-collision filtering.",
+    accent: "#f2e14c",
+    category: "samples",
+    hint: "Click a ragdoll to shove it around",
+    defaults: {
+      count: 3,
+      frictionTorque: 5,
+      hertz: 1,
+      dampingRatio: 0.7,
+      paused: false,
+      showLandmarks: false
+    },
+    controls: [
+      {
+        title: "Ragdolls",
+        controls: [
+          { key: "count", label: "Count", min: 1, max: 8, step: 1 },
+          { key: "frictionTorque", label: "Joint friction", min: 0, max: 20, step: 1 },
+          { key: "hertz", label: "Joint hertz", min: 0, max: 20, step: 0.5 },
+          { key: "dampingRatio", label: "Damping", min: 0, max: 4, step: 0.1 }
+        ]
+      },
+      baseDebugControls
+    ],
+    actions: [
+      { id: "toss", title: "Toss ragdolls" },
+      { id: "reset", title: "Respawn pile" }
+    ],
+    camera: {
+      position: [4.2, 2.8, 5.4],
+      target: [0, 0.6, 0],
+      fov: 42
+    },
+    gravity: () => [0, -10, 0],
+    setup(ctx) {
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [0, -0.5, 0],
+        halfExtents: [8, 0.5, 8],
+        material: ctx.material("ground"),
+        friction: 0.7,
+        receiveShadow: true
+      });
+
+      const count = Math.round(numberParam(ctx.params, "count"));
+      const options = {
+        frictionTorque: numberParam(ctx.params, "frictionTorque"),
+        hertz: numberParam(ctx.params, "hertz"),
+        dampingRatio: numberParam(ctx.params, "dampingRatio")
+      };
+
+      const humans: number[] = [];
+      for (let i = 0; i < count; i += 1) {
+        const angle = i * 2.39996;
+        const spread = count > 1 ? 0.9 : 0;
+        const { human } = ctx.addHuman(
+          [Math.cos(angle) * spread, 1.2 + i * 1.6, Math.sin(angle) * spread],
+          options
+        );
+        humans.push(human);
+      }
+
+      return {
+        actions: {
+          toss: () => {
+            for (const human of humans) {
+              ctx.world.humanSetVelocity(human, [0, 6, 0]);
+              ctx.world.humanApplyRandomImpulse(human, 10);
+            }
+          },
+          reset: () => undefined
+        },
+        metrics: () => ({
+          Ragdolls: count,
+          Bones: count * 14
+        })
+      };
+    }
   }
 ];
 
@@ -1450,6 +2101,11 @@ export const scenarioCategories: { id: ScenarioCategory; title: string; blurb: s
     id: "fun",
     title: "Fun & interactive",
     blurb: "Playable scenes built around one physics behavior each — joints, restitution, explosions, and gravity."
+  },
+  {
+    id: "samples",
+    title: "Official Box3D samples",
+    blurb: "Direct ports of scenes from the upstream Box3D samples app — same bodies, joints, and parameters, including the original 14-bone ragdoll running unmodified in WASM."
   },
   {
     id: "performance",

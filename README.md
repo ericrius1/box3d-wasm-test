@@ -63,6 +63,7 @@ The wrapper also exposes:
 - `world.createSphericalJoint(bodyA, bodyB, worldAnchor, { hertz, dampingRatio })` and `world.createDistanceJoint(bodyA, bodyB, anchorA, anchorB, { length, hertz, dampingRatio })` for chains, pendulums, and springs.
 - `world.applyForce`, `world.applyImpulseAtPoint`, `world.getBodyVelocity`, `world.getBodyMass`, `world.setBodyAwake`, and `world.isBodyAwake`.
 - `world.createTransformBatch(handles)` — reads position, rotation, and awake state for any number of bodies in a single WASM call per frame. This is the fast path for rendering; per-body getters cross the JS/WASM boundary once per call, while a batch crosses once per frame.
+- `world.spawnHuman(position, { frictionTorque, hertz, dampingRatio })` — spawns the official Box3D samples ragdoll (the vendored `shared/human.c`, compiled into the WASM module): 14 capsule bones, spherical joints with cone and twist limits, joint friction, and self-collision filtering. Returns per-bone body handles; `world.getBodyCapsule(handle)` exposes each bone's capsule for rendering.
 
 ## Examples
 
@@ -74,6 +75,16 @@ Fun and interactive:
 - Pinball Well: restitution and bullet-body behavior.
 - Blast Lab: radial explosion tuning.
 - Gravity Chamber: nonstandard gravity vectors inside a sealed volume.
+
+Official Box3D samples — direct ports from the [upstream samples app](https://github.com/erincatto/box3d) with the same bodies, joints, and parameters:
+
+- Box Stack: forty cubes settling into a single tall column.
+- Jenga Stack: alternating long boxes, two per level.
+- Dominoes: concentric spiral rings toppling in chains, instanced.
+- Restitution Array: a row of spheres with bounce factors stepping from 0 to 1.
+- Bounce House: a zero-gravity, perfectly elastic ball ricocheting at up to 120 m/s (continuous collision test).
+- Distance Joint: a hanging chain of dense spheres on tunable spring joints.
+- Ragdoll Pile: the original 14-bone samples human running unmodified in WASM.
 
 Performance and stress:
 
