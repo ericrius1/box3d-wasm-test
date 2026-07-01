@@ -20,7 +20,7 @@ import {
 } from "./lib/scenarios";
 import "./styles.css";
 
-const GITHUB_URL = "https://github.com/ericrius1/box3d-wasm";
+const GITHUB_URL = "https://github.com/ericrius1/box3d-wasm-test";
 const NPM_URL = "https://www.npmjs.com/package/box3d-wasm";
 const BOX3D_REPO_URL = "https://github.com/erincatto/box3d";
 const BOX3D_SITE_URL = "https://box2d.org/";
