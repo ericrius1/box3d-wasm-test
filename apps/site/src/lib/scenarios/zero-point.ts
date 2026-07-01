@@ -389,24 +389,50 @@ export const zeropointScenario: ScenarioDefinition = {
       }
     }
 
+    // ------------------------------------------------------------ starfield
+    const starCount = 360;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i += 1) {
+      const azimuth = Math.random() * Math.PI * 2;
+      const elevation = Math.random() * Math.PI * 0.46 + 0.06;
+      const r = 130;
+      starPositions[i * 3] = Math.cos(azimuth) * Math.cos(elevation) * r;
+      starPositions[i * 3 + 1] = Math.sin(elevation) * r;
+      starPositions[i * 3 + 2] = Math.sin(azimuth) * Math.cos(elevation) * r;
+    }
+    const starGeometry = new THREE.BufferGeometry();
+    starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+    const stars = new THREE.Points(
+      starGeometry,
+      new THREE.PointsMaterial({
+        color: 0x9fc8e8,
+        size: 1.6,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.75,
+        fog: false
+      })
+    );
+    ctx.scene.add(stars);
+
     // ------------------------------------------------------------ viewmodel
     ctx.scene.add(camera);
     const viewmodel = new THREE.Group();
-    const gunMetal = new THREE.MeshStandardMaterial({ color: 0x2b3242, roughness: 0.35, metalness: 0.8 });
-    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.42), gunMetal);
-    gunBody.position.z = 0.08;
+    const gunMetal = new THREE.MeshStandardMaterial({ color: 0x4d5871, roughness: 0.35, metalness: 0.75 });
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.52), gunMetal);
+    gunBody.position.z = 0.1;
     viewmodel.add(gunBody);
     const prongMaterial = new THREE.MeshStandardMaterial({
-      color: 0x39445c,
+      color: 0x5f6d8c,
       roughness: 0.3,
-      metalness: 0.85,
+      metalness: 0.8,
       emissive: 0x2fbde8,
-      emissiveIntensity: 0.25
+      emissiveIntensity: 0.45
     });
     for (let i = 0; i < 3; i += 1) {
-      const prong = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.022, 0.2), prongMaterial);
+      const prong = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.26), prongMaterial);
       const spread = (i / 3) * Math.PI * 2 + Math.PI / 6;
-      prong.position.set(Math.cos(spread) * 0.075, Math.sin(spread) * 0.075, -0.2);
+      prong.position.set(Math.cos(spread) * 0.1, Math.sin(spread) * 0.1, -0.26);
       prong.rotation.set(-Math.sin(spread) * 0.42, Math.cos(spread) * 0.42, 0);
       viewmodel.add(prong);
     }
@@ -414,13 +440,13 @@ export const zeropointScenario: ScenarioDefinition = {
     // halo; brightened per-frame while grabbing/punting.
     const coreBaseColor = new THREE.Color(0x66e6ff);
     const coreMaterial = new THREE.MeshBasicMaterial({ color: coreBaseColor.clone().multiplyScalar(0.3) });
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), coreMaterial);
-    core.position.z = -0.14;
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 12), coreMaterial);
+    core.position.z = -0.18;
     viewmodel.add(core);
-    const muzzleLight = new THREE.PointLight(0x59d6ff, 0, 6, 2);
-    muzzleLight.position.z = -0.3;
+    const muzzleLight = new THREE.PointLight(0x59d6ff, 0, 7, 1.8);
+    muzzleLight.position.z = -0.4;
     viewmodel.add(muzzleLight);
-    viewmodel.position.set(0.34, -0.32, -0.72);
+    viewmodel.position.set(0.4, -0.34, -0.85);
     viewmodel.traverse((child) => {
       child.castShadow = false;
       child.receiveShadow = false;
@@ -981,7 +1007,7 @@ export const zeropointScenario: ScenarioDefinition = {
         // ---- viewmodel juice
         recoil = Math.max(0, recoil - delta * 6);
         corePulse = Math.max(0, corePulse - delta * 3);
-        viewmodel.position.z = -0.72 + recoil * 0.14;
+        viewmodel.position.z = -0.85 + recoil * 0.16;
         viewmodel.rotation.x = recoil * 0.16;
         const holdGlow = rig.mode === "holding" ? 0.5 : rig.mode === "pulling" ? 0.3 : 0;
         const pulse = 0.8 + Math.sin(elapsed * 6) * 0.12 + corePulse + holdGlow;

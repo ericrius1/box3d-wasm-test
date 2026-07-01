@@ -9,6 +9,46 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Headless-testing aid: hidden tabs suspend rAF and throttle timers,
+      // which freezes the render loop. When the flag is set, a dedicated
+      // worker (exempt from throttling) pumps queued rAF callbacks.
+      // Enable with: localStorage.setItem("b3wPump", "1")
+      if (localStorage.getItem("b3wPump") === "1") {
+        (() => {
+          window.__pump = { frames: 0, errors: [] };
+          const queue = new Map();
+          let nextId = 1;
+          window.requestAnimationFrame = (cb) => {
+            queue.set(nextId, cb);
+            return nextId++;
+          };
+          window.cancelAnimationFrame = (id) => {
+            queue.delete(id);
+          };
+          const worker = new Worker(
+            URL.createObjectURL(
+              new Blob(["setInterval(() => postMessage(0), 16);"], { type: "text/javascript" })
+            )
+          );
+          worker.onmessage = () => {
+            const callbacks = [...queue.values()];
+            queue.clear();
+            const time = performance.now();
+            for (const callback of callbacks) {
+              try {
+                window.__pump.frames += 1;
+                callback(time);
+              } catch (error) {
+                if (window.__pump.errors.length < 5) {
+                  window.__pump.errors.push(String((error && error.stack) || error).slice(0, 500));
+                }
+              }
+            }
+          };
+        })();
+      }
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
