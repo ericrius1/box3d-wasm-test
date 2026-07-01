@@ -405,7 +405,10 @@ export const zeropointScenario: ScenarioDefinition = {
       prong.rotation.set(-Math.sin(spread) * 0.42, Math.cos(spread) * 0.42, 0);
       viewmodel.add(prong);
     }
-    const coreMaterial = new THREE.MeshBasicMaterial({ color: 0x66e6ff });
+    // Kept dim at idle so bloom doesn't smear the viewmodel into a corner
+    // halo; brightened per-frame while grabbing/punting.
+    const coreBaseColor = new THREE.Color(0x66e6ff);
+    const coreMaterial = new THREE.MeshBasicMaterial({ color: coreBaseColor.clone().multiplyScalar(0.3) });
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), coreMaterial);
     core.position.z = -0.14;
     viewmodel.add(core);
@@ -978,7 +981,10 @@ export const zeropointScenario: ScenarioDefinition = {
         const holdGlow = rig.mode === "holding" ? 0.5 : rig.mode === "pulling" ? 0.3 : 0;
         const pulse = 0.8 + Math.sin(elapsed * 6) * 0.12 + corePulse + holdGlow;
         core.scale.setScalar(0.9 + pulse * 0.25);
-        muzzleLight.intensity = 2 + pulse * 6;
+        // Idle stays almost dark; grab/punt action drives the flare.
+        const action = Math.min(1.4, corePulse + holdGlow);
+        coreMaterial.color.copy(coreBaseColor).multiplyScalar(0.3 + action * 0.7);
+        muzzleLight.intensity = 0.5 + action * 6;
 
         // ---- rig state machine
         camera.getWorldDirection(camDir);

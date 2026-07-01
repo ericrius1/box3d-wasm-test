@@ -186,14 +186,6 @@ h2 {
   line-height: 1.45;
 }
 
-.upstream-credit {
-  max-width: 650px;
-  margin: 16px 0 0;
-  color: #9eb5a8;
-  font-size: clamp(0.95rem, 1.6vw, 1.05rem);
-  line-height: 1.5;
-}
-
 .text-link {
   color: #b8f0c8;
   text-decoration: underline;

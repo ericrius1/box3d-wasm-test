@@ -107,8 +107,7 @@ function homeMarkup() {
       <div class="hero-copy">
         <p class="eyebrow">Box3D C17 physics compiled to WebAssembly</p>
         <h1>box3d-wasm</h1>
-        <p class="hero-deck">A unified TypeScript package and demo site for fast rigid-body experiments in browser games, tools, and prototypes.</p>
-        <p class="upstream-credit">WebAssembly port of ${externalLink(BOX3D_REPO_URL, "text-link", "Box3D")}, the open-source 3D physics engine by Erin Catto. See the ${externalLink(BOX3D_SITE_URL, "text-link", "official site")} and ${externalLink(BOX3D_ANNOUNCEMENT_URL, "text-link", "announcement post")}.</p>
+        <p class="hero-deck">${externalLink(BOX3D_REPO_URL, "text-link", "Box3D")}—the open-source 3D physics engine by Erin Catto—compiled to WebAssembly: a unified TypeScript package and demo site for fast rigid-body experiments in browser games, tools, and prototypes. Visit the ${externalLink(BOX3D_SITE_URL, "text-link", "official site")} or read the ${externalLink(BOX3D_ANNOUNCEMENT_URL, "text-link", "announcement")}.</p>
         <div class="hero-actions">
           ${internalLink("/examples", "button button--primary", `${icon("play")}Open examples`)}
           ${internalLink("/docs", "button", `${icon("book-open")}Read docs`)}
