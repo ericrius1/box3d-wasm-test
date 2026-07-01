@@ -1,0 +1,21 @@
+{
+  "name": "box3d-wasm-repo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace box3d-wasm run build && npm --workspace @box3d-wasm/site run dev -- --host 127.0.0.1",
+    "build": "npm --workspace box3d-wasm run build && npm --workspace @box3d-wasm/site run build",
+    "typecheck": "npm --workspaces run typecheck",
+    "preview": "npm --workspace @box3d-wasm/site run preview -- --host 127.0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/three": "^0.185.0",
+    "typescript": "^5.7.2"
+  }
+}

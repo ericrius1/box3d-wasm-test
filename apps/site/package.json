@@ -1,0 +1,26 @@
+{
+  "name": "@box3d-wasm/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tweakpane/core": "^2.0.5",
+    "box3d-wasm": "file:../../packages/box3d-wasm",
+    "lucide": "^0.468.0",
+    "stats.js": "^0.17.0",
+    "three": "^0.185.1",
+    "tweakpane": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/stats.js": "^0.17.3",
+    "@types/three": "^0.185.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
