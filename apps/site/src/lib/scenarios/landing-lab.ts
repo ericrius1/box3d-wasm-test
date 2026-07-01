@@ -4,7 +4,7 @@ import { baseDebugControls, boolParam, numberParam } from "./helpers";
 
 export const landingLabScenario: ScenarioDefinition = {
   id: "landing-lab",
-  title: "box3d-wasm",
+  title: "Landing Lab",
   eyebrow: "Box3D in the browser",
   deck: "Rigid bodies, impulses, and browser-native demos with a typed WebAssembly wrapper.",
   description:

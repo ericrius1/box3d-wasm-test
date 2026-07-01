@@ -5,7 +5,7 @@ import { baseDebugControls, numberParam } from "./helpers";
 
 const BLOCK_HALF: Vec3 = [0.42, 0.24, 0.2];
 const FLOOR_STEP = BLOCK_HALF[1] * 2;
-const CANNON_BASE: Vec3 = [0, 0.62, 11.2];
+const CANNON_RING_RADIUS = 11.2;
 const BALL_POOL = 14;
 
 function yawQuat(angle: number): Quat {
@@ -121,12 +121,13 @@ export const castlesiegeScenario: ScenarioDefinition = {
     grid: false,
     bloom: { strength: 0.75, radius: 0.5, threshold: 0.55 }
   },
-  hint: "Click anywhere to fire the cannon at that point",
+  hint: "Click anywhere — the next cannon on the ring fires at that point",
   defaults: {
     wallRadius: 5.6,
     wallFloors: 6,
     towers: 5,
     rings: 1,
+    cannons: 3,
     power: 30,
     ballSize: 0.34,
     paused: false,
@@ -145,6 +146,7 @@ export const castlesiegeScenario: ScenarioDefinition = {
     {
       title: "Cannon",
       controls: [
+        { key: "cannons", label: "Cannons on ring", min: 1, max: 5, step: 1 },
         { key: "power", label: "Muzzle power", min: 16, max: 48, step: 0.5, rebuild: false },
         { key: "ballSize", label: "Ball radius", min: 0.24, max: 0.5, step: 0.01 }
       ]
@@ -216,24 +218,40 @@ export const castlesiegeScenario: ScenarioDefinition = {
       torchLights.push(light);
     }
 
-    // Cannon: static base body plus an aimable barrel mesh.
-    ctx.addBox({
-      type: BodyType.Static,
-      position: CANNON_BASE,
-      halfExtents: [0.85, 0.62, 0.85],
-      material: ctx.colorMaterial("#2f3542", { roughness: 0.6, metalness: 0.35 })
-    });
-    const barrel = new THREE.Group();
-    const barrelMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.3, 2.1, 18),
-      new THREE.MeshStandardMaterial({ color: 0x454e61, roughness: 0.38, metalness: 0.75 })
-    );
-    barrelMesh.rotation.x = Math.PI / 2;
-    barrelMesh.position.z = -1.05;
-    barrelMesh.castShadow = true;
-    barrel.add(barrelMesh);
-    barrel.position.set(CANNON_BASE[0], CANNON_BASE[1] + 0.95, CANNON_BASE[2]);
-    ctx.scene.add(barrel);
+    // Cannons on a ring around the castle: static base bodies plus aimable
+    // barrel meshes. Shots rotate round-robin through the ring.
+    const cannonCount = Math.min(5, Math.max(1, Math.round(numberParam(ctx.params, "cannons"))));
+    const baseMaterial = ctx.colorMaterial("#2f3542", { roughness: 0.6, metalness: 0.35 });
+    const barrelGeometry = new THREE.CylinderGeometry(0.2, 0.3, 2.1, 18);
+    const barrelMaterial = new THREE.MeshStandardMaterial({ color: 0x454e61, roughness: 0.38, metalness: 0.75 });
+    const initialAim = new THREE.Vector3(0, 2, 0);
+    const aimMatrix = new THREE.Matrix4();
+
+    type Cannon = { pivot: THREE.Group; targetQuat: THREE.Quaternion };
+    const cannons: Cannon[] = [];
+    for (let i = 0; i < cannonCount; i += 1) {
+      const angle = Math.PI / 2 + (i * Math.PI * 2) / cannonCount;
+      const baseX = Math.cos(angle) * CANNON_RING_RADIUS;
+      const baseZ = Math.sin(angle) * CANNON_RING_RADIUS;
+      ctx.addBox({
+        type: BodyType.Static,
+        position: [baseX, 0.62, baseZ],
+        halfExtents: [0.85, 0.62, 0.85],
+        material: baseMaterial
+      });
+      const pivot = new THREE.Group();
+      const barrelMesh = new THREE.Mesh(barrelGeometry, barrelMaterial);
+      barrelMesh.rotation.x = Math.PI / 2;
+      barrelMesh.position.z = -1.05;
+      barrelMesh.castShadow = true;
+      pivot.add(barrelMesh);
+      pivot.position.set(baseX, 1.57, baseZ);
+      aimMatrix.lookAt(pivot.position, initialAim, THREE.Object3D.DEFAULT_UP);
+      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(aimMatrix);
+      pivot.quaternion.copy(targetQuat);
+      ctx.scene.add(pivot);
+      cannons.push({ pivot, targetQuat });
+    }
 
     const molten = ctx.colorMaterial("#ffb25e", {
       emissive: "#ff7a18",
@@ -264,26 +282,30 @@ export const castlesiegeScenario: ScenarioDefinition = {
 
     let shots = 0;
     let nextBall = 0;
+    let nextCannon = 0;
     let tracerBall: SimBody | undefined;
     let tracerAge = 0;
     const aimTarget = new THREE.Vector3(0, 2, 0);
-    const aimMatrix = new THREE.Matrix4();
-    const aimQuat = new THREE.Quaternion();
     const muzzle = new THREE.Vector3();
 
     const fire = (target: Vec3) => {
       const power = numberParam(ctx.params, "power");
       const ball = balls[nextBall];
       nextBall = (nextBall + 1) % balls.length;
+      const cannon = cannons[nextCannon % cannons.length];
+      nextCannon += 1;
 
       aimTarget.set(target[0], Math.max(target[1], 0.4), target[2]);
-      const base = new THREE.Vector3(CANNON_BASE[0], CANNON_BASE[1] + 0.95, CANNON_BASE[2]);
+      const base = cannon.pivot.position;
       const flat = aimTarget.clone().sub(base);
       const distance = flat.length();
       // Straight shot plus an upward bias that grows with range: playable
       // ballistics without solving the full projectile equation.
       const velocity = flat.clone().normalize().multiplyScalar(power);
       velocity.y += distance * 0.16 * (power / 30);
+
+      aimMatrix.lookAt(base, aimTarget, THREE.Object3D.DEFAULT_UP);
+      cannon.targetQuat.setFromRotationMatrix(aimMatrix);
 
       muzzle.copy(base).add(flat.normalize().multiplyScalar(1.4));
       ball.object.visible = true;
@@ -328,9 +350,9 @@ export const castlesiegeScenario: ScenarioDefinition = {
           torchLights[i].intensity = 14 * (0.82 + 0.3 * Math.sin(elapsed * 13 + i * 7.1) + 0.12 * Math.sin(elapsed * 29 + i * 3.7));
         }
 
-        aimMatrix.lookAt(barrel.position, aimTarget, THREE.Object3D.DEFAULT_UP);
-        aimQuat.setFromRotationMatrix(aimMatrix);
-        barrel.quaternion.slerp(aimQuat, Math.min(1, delta * 9));
+        for (const cannon of cannons) {
+          cannon.pivot.quaternion.slerp(cannon.targetQuat, Math.min(1, delta * 9));
+        }
 
         if (tracerBall) {
           tracerAge += delta;
@@ -362,6 +384,7 @@ export const castlesiegeScenario: ScenarioDefinition = {
       },
       metrics: () => ({
         Bricks: plan.positions.length,
+        Cannons: cannons.length,
         Toppled: `${toppledCount} (${Math.round((toppledCount / plan.positions.length) * 100)}%)`,
         Shots: shots
       })

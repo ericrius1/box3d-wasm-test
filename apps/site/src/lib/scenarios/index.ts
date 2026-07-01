@@ -21,11 +21,12 @@ import { sampleragdollsScenario } from "./sample-ragdolls";
 export * from "./types";
 export * from "./helpers";
 
-export const heroScenario = landingLabScenario;
+export const heroScenario = castlesiegeScenario;
 
 export const exampleScenarios = [
   castlesiegeScenario,
   sumorumbleScenario,
+  landingLabScenario,
   stackfallScenario,
   wreckingballScenario,
   bowlinglaneScenario,
@@ -67,7 +68,7 @@ export const scenarioCategories: { id: ScenarioCategory; title: string; blurb: s
   }
 ];
 
-export const allScenarios = [heroScenario, ...exampleScenarios];
+export const allScenarios = [...new Set([heroScenario, ...exampleScenarios])];
 
 
 export const GITHUB_REPO = "https://github.com/ericrius1/box3d-wasm-test";
