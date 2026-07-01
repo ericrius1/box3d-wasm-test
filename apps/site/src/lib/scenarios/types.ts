@@ -32,7 +32,17 @@ export type ScenarioCamera = {
   fov?: number;
 };
 
-export type ScenarioCategory = "fun" | "samples" | "performance";
+export type ScenarioCategory = "games" | "fun" | "samples" | "performance";
+
+export type ScenarioVisuals = {
+  /** Threshold bloom over the final frame; bright/emissive surfaces glow. */
+  bloom?: { strength?: number; radius?: number; threshold?: number };
+  lighting?: "studio" | "night";
+  background?: string;
+  fog?: { color?: string; near?: number; far?: number } | false;
+  /** Set false to hide the default floor grid. */
+  grid?: boolean;
+};
 
 export type SimBody = {
   body: number;
@@ -61,10 +71,14 @@ export type MaterialRole =
 export type ScenarioContext = {
   world: PhysicsWorld;
   scene: THREE.Scene;
+  camera: THREE.Camera;
   landmarkGroup: THREE.Group;
   params: ScenarioParams;
   material(role: MaterialRole): THREE.Material;
-  colorMaterial(color: string, options?: { metalness?: number; roughness?: number; emissive?: string }): THREE.Material;
+  colorMaterial(
+    color: string,
+    options?: { metalness?: number; roughness?: number; emissive?: string; emissiveIntensity?: number }
+  ): THREE.Material;
   addBox(options: {
     type: typeof BodyType[keyof typeof BodyType];
     position: Vec3;
@@ -150,6 +164,7 @@ export type ScenarioDefinition = {
   description: string;
   accent: string;
   category: ScenarioCategory;
+  visuals?: ScenarioVisuals;
   hint?: string;
   defaults: ScenarioParams;
   controls: ControlFolder[];

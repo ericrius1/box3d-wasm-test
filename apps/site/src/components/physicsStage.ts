@@ -2,8 +2,13 @@ import { createBox3D, TRANSFORM_STRIDE, type Box3D, type PhysicsWorld, type Tran
 import Stats from "stats.js";
 import { WebGLRenderer } from "three";
 import * as THREE from "three/webgpu";
-import { color, float, mix, oscSine, time } from "three/tsl";
+import { color, float, mix, oscSine, pass, time } from "three/tsl";
+import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { Pane } from "tweakpane";
 import type {
   ControlDefinition,
@@ -197,7 +202,7 @@ function createMaterials(accent: string, backend: RendererBackend) {
     role(role: MaterialRole) {
       return cache.get(role)!;
     },
-    color(colorValue: string, options: { metalness?: number; roughness?: number; emissive?: string } = {}) {
+    color(colorValue: string, options: { metalness?: number; roughness?: number; emissive?: string; emissiveIntensity?: number } = {}) {
       const key = JSON.stringify([backend, colorValue, options]);
       const existing = colorCache.get(key);
       if (existing) {
@@ -208,7 +213,7 @@ function createMaterials(accent: string, backend: RendererBackend) {
         metalness: options.metalness ?? 0.16,
         roughness: options.roughness ?? 0.55,
         emissive: options.emissive,
-        emissiveIntensity: options.emissive ? 0.3 : 0
+        emissiveIntensity: options.emissive ? (options.emissiveIntensity ?? 0.3) : 0
       });
       colorCache.set(key, material);
       return material;
@@ -216,19 +221,37 @@ function createMaterials(accent: string, backend: RendererBackend) {
   };
 }
 
-function addLights(scene: THREE.Scene, extent = 14) {
+function configureShadow(light: THREE.DirectionalLight, extent: number) {
+  light.castShadow = true;
+  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.camera.left = -extent;
+  light.shadow.camera.right = extent;
+  light.shadow.camera.top = extent;
+  light.shadow.camera.bottom = -extent;
+  light.shadow.camera.near = 0.5;
+  light.shadow.camera.far = Math.max(34, extent * 3.4);
+}
+
+function addLights(scene: THREE.Scene, extent = 14, preset: "studio" | "night" = "studio") {
+  if (preset === "night") {
+    scene.add(new THREE.HemisphereLight(0x33456e, 0x080b12, 0.66));
+
+    const moon = new THREE.DirectionalLight(0x9db8ff, 1.15);
+    moon.position.set(-5, 9, 3.5).normalize().multiplyScalar(Math.max(10, extent));
+    configureShadow(moon, extent);
+    scene.add(moon);
+
+    const ember = new THREE.DirectionalLight(0xff9a5c, 0.24);
+    ember.position.set(6, 2.5, -5);
+    scene.add(ember);
+    return;
+  }
+
   scene.add(new THREE.HemisphereLight(0xbfe4de, 0x38453f, 0.82));
 
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
   key.position.set(4.5, 8, 4.2).normalize().multiplyScalar(Math.max(10, extent));
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -extent;
-  key.shadow.camera.right = extent;
-  key.shadow.camera.top = extent;
-  key.shadow.camera.bottom = -extent;
-  key.shadow.camera.near = 0.5;
-  key.shadow.camera.far = Math.max(34, extent * 3.4);
+  configureShadow(key, extent);
   scene.add(key);
 
   const rim = new THREE.DirectionalLight(0x98d8ff, 1.0);
@@ -329,6 +352,8 @@ export class PhysicsStage {
   #backend: RendererBackend = "webgl";
   #scene: THREE.Scene | undefined;
   #camera: THREE.PerspectiveCamera | undefined;
+  #postProcessing: THREE.RenderPipeline | undefined;
+  #composer: EffectComposer | undefined;
   #orbit: OrbitControls | undefined;
   #pane: Pane | undefined;
   #stats: Stats | undefined;
@@ -399,6 +424,8 @@ export class PhysicsStage {
     this.#transformBatch = undefined;
     this.#currentWorld?.dispose();
     this.#pane?.dispose();
+    this.#postProcessing?.dispose();
+    this.#composer?.dispose();
     this.#renderer?.dispose();
     this.#orbit?.dispose();
 
@@ -437,10 +464,22 @@ export class PhysicsStage {
     const camPosition = new THREE.Vector3(...this.#scenario.camera.position);
     const camTarget = new THREE.Vector3(...this.#scenario.camera.target);
     const camDistance = camPosition.distanceTo(camTarget);
-    this.#scene.fog = new THREE.Fog(0x101514, Math.max(14, camDistance * 1.1), Math.max(30, camDistance * 2.4));
+    const visuals = this.#scenario.visuals;
+    if (visuals?.fog !== false) {
+      const fogColor = hex(visuals?.fog?.color ?? "#101514");
+      this.#scene.fog = new THREE.Fog(
+        fogColor,
+        visuals?.fog?.near ?? Math.max(14, camDistance * 1.1),
+        visuals?.fog?.far ?? Math.max(30, camDistance * 2.4)
+      );
+    }
+    if (visuals?.background) {
+      this.#scene.background = new THREE.Color(hex(visuals.background));
+    }
 
     this.#camera = new THREE.PerspectiveCamera(this.#scenario.camera.fov ?? 43, 1, 0.05, 200);
     this.#camera.position.copy(camPosition);
+    this.#setupPostProcessing();
 
     this.#orbit = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#orbit.enableDamping = true;
@@ -540,6 +579,31 @@ export class PhysicsStage {
     });
   }
 
+  #setupPostProcessing() {
+    const bloomOptions = this.#scenario.visuals?.bloom;
+    if (!bloomOptions || !this.#renderer || !this.#scene || !this.#camera) {
+      return;
+    }
+
+    const strength = bloomOptions.strength ?? 0.6;
+    const radius = bloomOptions.radius ?? 0.45;
+    const threshold = bloomOptions.threshold ?? 0.62;
+
+    if (this.#backend === "webgpu-tsl") {
+      const scenePass = pass(this.#scene, this.#camera);
+      const post = new THREE.RenderPipeline(this.#renderer as THREE.WebGPURenderer);
+      post.outputNode = scenePass.add(bloom(scenePass, strength, radius, threshold));
+      this.#postProcessing = post;
+      return;
+    }
+
+    const composer = new EffectComposer(this.#renderer as WebGLRenderer);
+    composer.addPass(new RenderPass(this.#scene, this.#camera));
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), strength, radius, threshold));
+    composer.addPass(new OutputPass());
+    this.#composer = composer;
+  }
+
   #scheduleRebuild = () => {
     window.clearTimeout(this.#rebuildTimer);
     this.#rebuildTimer = window.setTimeout(() => {
@@ -567,6 +631,7 @@ export class PhysicsStage {
     const width = Math.max(1, Math.floor(rect.width));
     const height = Math.max(1, Math.floor(rect.height));
     this.#renderer.setSize(width, height, false);
+    this.#composer?.setSize(width, height);
     this.#camera.aspect = width / height;
     this.#camera.updateProjectionMatrix();
   };
@@ -582,6 +647,7 @@ export class PhysicsStage {
     return {
       world,
       scene,
+      camera: this.#camera!,
       landmarkGroup,
       params: this.#params,
       material: (role) => materials.role(role),
@@ -840,8 +906,11 @@ export class PhysicsStage {
 
     const camPosition = new THREE.Vector3(...this.#scenario.camera.position);
     const camTarget = new THREE.Vector3(...this.#scenario.camera.target);
-    addLights(this.#scene, Math.max(14, camPosition.distanceTo(camTarget) * 0.8));
-    this.#scene.add(createPanelGrid());
+    const visuals = this.#scenario.visuals;
+    addLights(this.#scene, Math.max(14, camPosition.distanceTo(camTarget) * 0.8), visuals?.lighting ?? "studio");
+    if (visuals?.grid !== false) {
+      this.#scene.add(createPanelGrid());
+    }
 
     const materials = createMaterials(this.#scenario.accent, this.#backend);
     const world = this.#box3d.createWorld(this.#scenario.gravity(this.#params));
@@ -1034,7 +1103,13 @@ export class PhysicsStage {
     }
 
     this.#orbit.update();
-    this.#renderer.render(this.#scene, this.#camera);
+    if (this.#postProcessing) {
+      this.#postProcessing.render();
+    } else if (this.#composer) {
+      this.#composer.render();
+    } else {
+      this.#renderer.render(this.#scene, this.#camera);
+    }
     // WebGPU's info.render.calls is cumulative since app start; drawCalls and
     // triangles are per-frame on both backends (WebGL calls per-frame too).
     const renderInfo = this.#renderer.info.render as { calls: number; drawCalls?: number; triangles: number };
