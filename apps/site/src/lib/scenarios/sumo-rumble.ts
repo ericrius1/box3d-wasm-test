@@ -4,13 +4,17 @@ import type { Quat, ScenarioDefinition, SimBody, Vec3 } from "./types";
 import { baseDebugControls, numberParam } from "./helpers";
 
 const MAX_WAVES = 8;
-const FALL_Y = -5;
+// Ring-out line: just under the deck (deck spans y −1..0). Detecting here
+// instead of deep in the void keeps knockouts snappy and avoids the engine
+// sleeping a tumbling island mid-fall where a deeper threshold never fires.
+const FALL_Y = -0.8;
 const GRAVITY = 15;
 const BONE_PELVIS = 0;
 const BONE_HEAD = 5;
 const BOT_POOL_CAP = 16;
-const BOT_STAGGER = 1.6;
+const BOT_STAGGER = 1.8;
 const PLAYER_STAGGER = 0.9;
+const COUNTDOWN = 3;
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -40,9 +44,9 @@ export const sumorumbleScenario: ScenarioDefinition = {
   id: "sumo-rumble",
   title: "Sumo Rumble",
   eyebrow: "Arena knockout game",
-  deck: "Waves of marionette-balanced ragdoll bots charge you across a neon ring — shove them off the edge and stay standing.",
+  deck: "Waves of marionette-balanced ragdoll bots charge you across a neon ring — shove them off the edge without getting rung out yourself.",
   description:
-    "Every wrestler in the ring is a live 14-bone ragdoll held upright by invisible marionette springs. Shove one hard enough — or tip it past the point of recovery — and its balance cuts out: it crumples, tumbles, and rolls toward the void. You drive the glowing teal wrestler with camera-relative WASD shoves and a hop; crimson bots charge straight at you in growing waves, and every knockout is a real ring-out. Turn balance strength down to watch the whole cast go from stone-footed to staggering.",
+    "Every wrestler in the ring is a live 14-bone ragdoll held upright by invisible marionette springs. Shove one hard enough — or tip it past the point of recovery — and its balance cuts out: it crumples, tumbles, and rolls toward the void. Each wave spawns standing at the rim, holds through a 3-2-1 countdown, then charges the glowing teal wrestler: you. Drive with camera-relative WASD, hop with Space, and click to throw a haymaker that sends the nearest bot tumbling; every knockout is a real ring-out, and if the crowd bounces you off the platform instead, the wave restarts. Turn balance strength down to watch the whole cast go from stone-footed to staggering.",
   accent: "#3affd8",
   category: "games",
   visuals: {
@@ -52,14 +56,14 @@ export const sumorumbleScenario: ScenarioDefinition = {
     grid: false,
     bloom: { strength: 0.9, radius: 0.55, threshold: 0.5 }
   },
-  hint: "You are the glowing teal wrestler — WASD / arrows to shove, Space to hop. Knock every crimson bot off the ring.",
+  hint: "You are the glowing teal wrestler — WASD to move, click to punch, Space to hop. After the 3-2-1, bots charge: ring them out without falling.",
   defaults: {
-    arenaRadius: 6,
-    thrust: 30,
+    arenaRadius: 7.5,
+    thrust: 34,
     jumpPower: 8,
     waveSize: 3,
     waveGrowth: 2,
-    aggression: 12,
+    aggression: 10,
     balance: 1,
     paused: false,
     showLandmarks: false
@@ -68,7 +72,7 @@ export const sumorumbleScenario: ScenarioDefinition = {
     {
       title: "Arena (rebuilds)",
       controls: [
-        { key: "arenaRadius", label: "Ring radius", min: 4, max: 9, step: 0.25 },
+        { key: "arenaRadius", label: "Ring radius", min: 4, max: 12, step: 0.25 },
         { key: "waveSize", label: "First wave bots", min: 1, max: 8, step: 1 },
         { key: "waveGrowth", label: "Bots per wave", min: 0, max: 4, step: 1 }
       ]
@@ -90,7 +94,7 @@ export const sumorumbleScenario: ScenarioDefinition = {
     { id: "reset", title: "Restart match" }
   ],
   camera: {
-    position: [0, 12.5, 15],
+    position: [0, 14.5, 17.5],
     target: [0, 0.4, 0],
     fov: 45
   },
@@ -190,11 +194,17 @@ export const sumorumbleScenario: ScenarioDefinition = {
       }
     };
 
+    // Note: never force-sleep on retire. Sleep is island-based, so putting a
+    // ring-out's bones to sleep also freezes whoever it was still touching —
+    // including the player mid-fall. Parked bodies go still and the engine
+    // sleeps them naturally once isolated.
     const setWrestlerLive = (wrestler: Wrestler, live: boolean) => {
       for (const bone of wrestler.bones) {
         bone.object.visible = live;
         ctx.world.setBodyGravityScale(bone.body, live ? 1 : 0);
-        ctx.world.setBodyAwake(bone.body, live);
+        if (live) {
+          ctx.world.setBodyAwake(bone.body, true);
+        }
       }
     };
 
@@ -202,20 +212,25 @@ export const sumorumbleScenario: ScenarioDefinition = {
     const playerLight = new THREE.PointLight(0x3affd8, 16, 9, 2);
     ctx.scene.add(playerLight);
 
-    type Bot = { wrestler: Wrestler; active: boolean };
+    type Bot = { wrestler: Wrestler; active: boolean; shoveCd: number };
     const parkSpot = (index: number): Vec3 => [index * 6 - botPool * 3, -60, 40];
     const bots: Bot[] = [];
+    const handleToBot = new Map<number, Bot>();
     for (let i = 0; i < botPool; i += 1) {
       const wrestler = spawnWrestler(parkSpot(i), botBody, botHead);
-      const bot: Bot = { wrestler, active: false };
+      const bot: Bot = { wrestler, active: false, shoveCd: 0 };
       setWrestlerLive(wrestler, false);
       bots.push(bot);
+      for (const bone of wrestler.bones) {
+        handleToBot.set(bone.body, bot);
+      }
     }
 
     let wave = 0;
+    let nextWave = 1;
     let knockouts = 0;
     let falls = 0;
-    let state: "intermission" | "active" | "won" = "intermission";
+    let state: "intermission" | "countdown" | "active" | "won" = "intermission";
     let stateTimer = 1.2;
     let activeCount = 0;
 
@@ -237,8 +252,11 @@ export const sumorumbleScenario: ScenarioDefinition = {
       setWrestlerLive(bot.wrestler, false);
     };
 
+    // Bots spawn standing at the rim and hold through a 3-2-1 countdown
+    // before the charge begins; the player may reposition freely meanwhile.
     const startWave = (w: number) => {
       wave = w;
+      nextWave = w + 1;
       const total = botsForWave(w);
       let spawned = 0;
       for (const bot of bots) {
@@ -251,7 +269,8 @@ export const sumorumbleScenario: ScenarioDefinition = {
         }
       }
       activeCount = spawned;
-      state = "active";
+      state = "countdown";
+      stateTimer = COUNTDOWN;
     };
 
     // Also acts as the initial grace window while the first frames settle
@@ -262,6 +281,7 @@ export const sumorumbleScenario: ScenarioDefinition = {
       setWrestlerLive(player, true);
       player.stagger = 0;
       player.recover = 0;
+      playerAnchor = null;
       respawnLock = 0.9;
     };
 
@@ -311,7 +331,10 @@ export const sumorumbleScenario: ScenarioDefinition = {
       }
       // Balance only acts near the deck: no mid-air hovering after a hop or a
       // launch, and no climbing back once a wrestler has dropped off the edge.
-      const grounded = p[1] < wrestler.standY + 0.45 && p[1] > -1.2;
+      // The lift spring is pure levitation, so it must also cut out when the
+      // wrestler is shoved past the rim — otherwise ring-outs never fall.
+      const overDeck = Math.hypot(p[0], p[2]) < radius;
+      const grounded = overDeck && p[1] < wrestler.standY + 0.45 && p[1] > -1.2;
       if (!grounded) {
         return false;
       }
@@ -322,8 +345,9 @@ export const sumorumbleScenario: ScenarioDefinition = {
         if (upright > 0.8) {
           wrestler.recover = 0;
         }
-      } else if (allowStagger && (upright < 0.45 || horizontal > (isPlayer ? 7 : 5.5))) {
-        // Player gets a forgiving speed threshold; bots knock down easier.
+      } else if (allowStagger && (upright < (isPlayer ? 0.4 : 0.5) || horizontal > (isPlayer ? 9 : 5.5))) {
+        // Player gets forgiving thresholds; bots tip and launch easier, so a
+        // committed shove reliably fells one bot even mid-scrum.
         wrestler.stagger = isPlayer ? PLAYER_STAGGER : BOT_STAGGER;
         return false;
       }
@@ -333,12 +357,14 @@ export const sumorumbleScenario: ScenarioDefinition = {
       const lift = wrestler.mass * (GRAVITY + 34 * (wrestler.standY - p[1]) - 7 * pelvisVel.linear[1]) * balance;
       ctx.world.applyForce(pelvis.body, [0, Math.min(Math.max(lift, 0), wrestler.mass * GRAVITY * (recovering ? 3.2 : 2.6)), 0]);
 
+      // Damp the head's velocity RELATIVE to the pelvis: absolute damping drags
+      // the head ~0.5 m behind at running speed and reads as a fall.
       const headVel = ctx.world.getBodyVelocity(head.body);
       const gain = 30 * balance;
       const authority = wrestler.mass * 0.3;
-      let fx = authority * (gain * (p[0] - h[0]) - 5.5 * headVel.linear[0]);
-      let fy = authority * (gain * (p[1] + wrestler.headAbove - h[1]) - 5.5 * headVel.linear[1]);
-      let fz = authority * (gain * (p[2] - h[2]) - 5.5 * headVel.linear[2]);
+      let fx = authority * (gain * (p[0] - h[0]) - 5.5 * (headVel.linear[0] - pelvisVel.linear[0]));
+      let fy = authority * (gain * (p[1] + wrestler.headAbove - h[1]) - 5.5 * (headVel.linear[1] - pelvisVel.linear[1]));
+      let fz = authority * (gain * (p[2] - h[2]) - 5.5 * (headVel.linear[2] - pelvisVel.linear[2]));
       const magnitude = Math.hypot(fx, fy, fz);
       const cap = wrestler.mass * (recovering ? 62 : 46);
       if (magnitude > cap) {
@@ -351,12 +377,142 @@ export const sumorumbleScenario: ScenarioDefinition = {
       return true;
     };
 
-    // Horizontal drive on the pelvis plus a touch on the head so wrestlers lean
-    // into their charge instead of gliding.
+    // Horizontal drive on the pelvis. Deliberately no forward force on the
+    // head: leaning the head into the charge just tips the marionette over.
     const driveWrestler = (wrestler: Wrestler, dirX: number, dirZ: number, force: number) => {
       const pelvis = wrestler.bones[BONE_PELVIS];
       ctx.world.applyForce(pelvis.body, [dirX * force, 0, dirZ * force]);
-      ctx.world.applyForce(wrestler.bones[BONE_HEAD].body, [dirX * force * 0.12, 0, dirZ * force * 0.12]);
+    };
+
+    // Undriven wrestlers brake to a standstill instead of creeping around the
+    // ring: the marionette springs alone produce a slow wander.
+    const brakeWrestler = (wrestler: Wrestler, strength: number) => {
+      const pelvis = wrestler.bones[BONE_PELVIS];
+      const velocity = ctx.world.getBodyVelocity(pelvis.body);
+      ctx.world.applyForce(pelvis.body, [
+        -velocity.linear[0] * wrestler.mass * strength,
+        0,
+        -velocity.linear[2] * wrestler.mass * strength
+      ]);
+    };
+
+    // Planted sumo stance: with no input the player holds a spot instead of
+    // drifting, and puts up real resistance to being bulldozed. The anchor
+    // re-plants once shoved more than 1.2 m so yielding ground stays possible.
+    let playerAnchor: [number, number] | null = null;
+    const holdStance = () => {
+      const pelvis = player.bones[BONE_PELVIS];
+      const p = pelvis.transform.position;
+      if (!playerAnchor || Math.hypot(playerAnchor[0] - p[0], playerAnchor[1] - p[2]) > 1.2) {
+        playerAnchor = [p[0], p[2]];
+      }
+      const velocity = ctx.world.getBodyVelocity(pelvis.body);
+      let fx = player.mass * (18 * (playerAnchor[0] - p[0]) - 8 * velocity.linear[0]);
+      let fz = player.mass * (18 * (playerAnchor[1] - p[2]) - 8 * velocity.linear[2]);
+      const magnitude = Math.hypot(fx, fz);
+      const cap = player.mass * GRAVITY * 2;
+      if (magnitude > cap) {
+        fx *= cap / magnitude;
+        fz *= cap / magnitude;
+      }
+      ctx.world.applyForce(pelvis.body, [fx, 0, fz]);
+    };
+
+    // Big center-screen countdown / FIGHT! banner, mounted over the canvas.
+    const banner = document.createElement("div");
+    banner.style.cssText =
+      "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;" +
+      "pointer-events:none;user-select:none;z-index:5;opacity:0;transition:opacity 0.18s;" +
+      "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;" +
+      "font-size:clamp(64px,12vw,132px);color:#3affd8;" +
+      "text-shadow:0 0 28px rgba(58,255,216,0.85),0 0 90px rgba(58,255,216,0.4);";
+    const bannerHost = ctx.domElement.parentElement;
+    if (bannerHost) {
+      if (getComputedStyle(bannerHost).position === "static") {
+        bannerHost.style.position = "relative";
+      }
+      bannerHost.appendChild(banner);
+    }
+    // Click-to-punch: a haymaker toward the clicked point. Big impulse, short
+    // cooldown — this is the knockout button; WASD is for positioning.
+    let punchCd = 0;
+    const punch = (point: Vec3, bodyHandle?: number) => {
+      if (punchCd > 0 || player.stagger > 0) {
+        return;
+      }
+      const p = player.bones[BONE_PELVIS].transform.position;
+      let dirX = point[0] - p[0];
+      let dirZ = point[2] - p[2];
+      let dirLen = Math.hypot(dirX, dirZ);
+      if (dirLen < 0.6) {
+        // Click landed on (or raycast hit) the player's own body — the
+        // direction is meaningless noise. Auto-aim at the nearest bot instead.
+        let bestX = 0;
+        let bestZ = 0;
+        let bestLen = Infinity;
+        for (const bot of bots) {
+          if (!bot.active) {
+            continue;
+          }
+          const bp = bot.wrestler.bones[BONE_PELVIS].transform.position;
+          const relX = bp[0] - p[0];
+          const relZ = bp[2] - p[2];
+          const relLen = Math.hypot(relX, relZ);
+          if (relLen > 1e-3 && relLen < bestLen) {
+            bestLen = relLen;
+            bestX = relX;
+            bestZ = relZ;
+          }
+        }
+        if (!Number.isFinite(bestLen)) {
+          return;
+        }
+        dirX = bestX;
+        dirZ = bestZ;
+        dirLen = bestLen;
+      }
+      dirX /= dirLen;
+      dirZ /= dirLen;
+      punchCd = 0.45;
+      // Small lunge into the punch so it reads as the player's action.
+      ctx.world.applyImpulse(player.bones[BONE_PELVIS].body, [
+        dirX * player.mass * 1.1,
+        0,
+        dirZ * player.mass * 1.1
+      ]);
+      const clicked = bodyHandle !== undefined ? handleToBot.get(bodyHandle) : undefined;
+      for (const bot of bots) {
+        if (!bot.active) {
+          continue;
+        }
+        const bp = bot.wrestler.bones[BONE_PELVIS].transform.position;
+        const relX = bp[0] - p[0];
+        const relZ = bp[2] - p[2];
+        const relLen = Math.hypot(relX, relZ);
+        const inArc = relLen < 2 && (relX * dirX + relZ * dirZ) / Math.max(relLen, 1e-4) > 0.35;
+        if (bot === clicked ? relLen < 2.6 : inArc) {
+          ctx.world.applyImpulse(bot.wrestler.bones[BONE_PELVIS].body, [
+            dirX * bot.wrestler.mass * 9,
+            bot.wrestler.mass * 1.6,
+            dirZ * bot.wrestler.mass * 9
+          ]);
+          bot.wrestler.stagger = Math.max(bot.wrestler.stagger, 2.2);
+          bot.wrestler.recover = 0;
+        }
+      }
+    };
+
+    let bannerText = "";
+    let fightFlash = 0;
+    const setBanner = (text: string, color?: string) => {
+      if (text !== bannerText) {
+        bannerText = text;
+        banner.textContent = text;
+        if (color) {
+          banner.style.color = color;
+        }
+      }
+      banner.style.opacity = text ? "1" : "0";
     };
 
     return {
@@ -382,8 +538,12 @@ export const sumorumbleScenario: ScenarioDefinition = {
         },
         reset: () => undefined
       },
+      onPointerDown: (point, bodyHandle) => {
+        punch(point, bodyHandle);
+      },
       update: (delta) => {
         hopCooldown = Math.max(0, hopCooldown - delta);
+        punchCd = Math.max(0, punchCd - delta);
         respawnLock = Math.max(0, respawnLock - delta);
 
         const playerBalanced = balanceWrestler(player, delta, respawnLock === 0);
@@ -406,17 +566,30 @@ export const sumorumbleScenario: ScenarioDefinition = {
         if (pressed.has("d") || pressed.has("arrowright")) inputX += 1;
         if (pressed.has("a") || pressed.has("arrowleft")) inputX -= 1;
 
-        if ((inputX !== 0 || inputZ !== 0) && playerBalanced && respawnLock === 0) {
-          // Soft speed cap: thrust fades out near 4.5 m/s so shoves stay punchy
-          // without the marionette tripping over its own dragged feet.
-          const velocity = ctx.world.getBodyVelocity(pelvis.body);
-          const horizontal = Math.hypot(velocity.linear[0], velocity.linear[2]);
-          const headroom = Math.max(0, 1 - horizontal / 4.5);
-          const thrust = numberParam(ctx.params, "thrust") * player.mass * headroom;
-          const norm = 1 / Math.hypot(inputX, inputZ);
-          const dirX = (forward.x * inputZ + right.x * inputX) * norm;
-          const dirZ = (forward.z * inputZ + right.z * inputX) * norm;
-          driveWrestler(player, dirX, dirZ, thrust);
+        let driveX = 0;
+        let driveZ = 0;
+        let driving = false;
+        if (playerBalanced) {
+          if ((inputX !== 0 || inputZ !== 0) && respawnLock === 0) {
+            const norm = 1 / Math.hypot(inputX, inputZ);
+            driveX = (forward.x * inputZ + right.x * inputX) * norm;
+            driveZ = (forward.z * inputZ + right.z * inputX) * norm;
+            driving = true;
+            // Soft speed cap on velocity ALONG the input direction only: top
+            // speed stays ~5.5 m/s, but steering against your momentum keeps
+            // full force — otherwise one hard launch is unrecoverable because
+            // the brakes cut out exactly when you need them.
+            const velocity = ctx.world.getBodyVelocity(pelvis.body);
+            const along = velocity.linear[0] * driveX + velocity.linear[2] * driveZ;
+            const headroom = Math.min(1.2, Math.max(0, 1 - along / 5.5));
+            const thrust = numberParam(ctx.params, "thrust") * player.mass * headroom;
+            driveWrestler(player, driveX, driveZ, thrust);
+            playerAnchor = null;
+          } else {
+            holdStance();
+          }
+        } else {
+          playerAnchor = null;
         }
 
         if (pressed.has(" ") && hopCooldown === 0 && playerBalanced && playerPos[1] < player.standY + 0.35) {
@@ -430,11 +603,27 @@ export const sumorumbleScenario: ScenarioDefinition = {
         playerLight.position.set(playerPos[0], playerPos[1] + 1.1, playerPos[2]);
 
         if (playerPos[1] < FALL_Y) {
+          // Ring-out on the player: the wave doesn't stay cleared for free —
+          // clear the field, respawn, and replay the same wave.
           falls += 1;
           respawnPlayer();
+          if (state === "active" || state === "countdown") {
+            for (const [index, bot] of bots.entries()) {
+              if (bot.active) {
+                retireBot(bot, index);
+              }
+            }
+            activeCount = 0;
+            nextWave = Math.max(1, wave);
+            state = "intermission";
+            stateTimer = 1.2;
+          }
         }
 
         const aggression = numberParam(ctx.params, "aggression");
+        const playerDown = player.stagger > 0 || player.recover > 0;
+        type Fighter = { bot: Bot; length: number; dx: number; dz: number };
+        const fighters: Fighter[] = [];
         for (const [index, bot] of bots.entries()) {
           if (!bot.active) {
             continue;
@@ -447,34 +636,121 @@ export const sumorumbleScenario: ScenarioDefinition = {
             activeCount -= 1;
             continue;
           }
+
+          // The shove: driving into a bot knocks it down and sends it sliding.
+          // This is the player's offense — line one up near the rim and commit.
+          bot.shoveCd = Math.max(0, bot.shoveCd - delta);
+          if (driving && bot.shoveCd === 0) {
+            const relX = botPos[0] - playerPos[0];
+            const relZ = botPos[2] - playerPos[2];
+            const relLen = Math.hypot(relX, relZ);
+            // Reach must exceed the ragdolls' collision envelope (~1.4 m pelvis
+            // to pelvis once arms touch) or the collision always wins first.
+            if (relLen < 1.65 && (relX * driveX + relZ * driveZ) / Math.max(relLen, 1e-4) > 0.35) {
+              // Scale with the Shove power slider (3.8 at the default of 30).
+              const punch = numberParam(ctx.params, "thrust") * 0.127;
+              ctx.world.applyImpulse(botPelvis.body, [
+                driveX * bot.wrestler.mass * punch,
+                bot.wrestler.mass * 0.7,
+                driveZ * bot.wrestler.mass * punch
+              ]);
+              bot.wrestler.stagger = Math.max(bot.wrestler.stagger, 1.2);
+              bot.wrestler.recover = 0;
+              bot.shoveCd = 0.55;
+            }
+          }
+
           const balanced = balanceWrestler(bot.wrestler, delta, true);
           if (!balanced) {
             continue;
           }
+          if (state !== "active" || playerDown) {
+            // Hold for the countdown — and back off while the player is down.
+            // Without the mercy window, one knockdown becomes a guaranteed
+            // bulldoze off the rim and the game stops being winnable.
+            brakeWrestler(bot.wrestler, 5);
+            continue;
+          }
           const dx = playerPos[0] - botPos[0];
           const dz = playerPos[2] - botPos[2];
-          const length = Math.hypot(dx, dz);
-          if (length > 0.85) {
+          fighters.push({ bot, length: Math.hypot(dx, dz), dx, dz });
+        }
+
+        // Attack tickets: only the two nearest bots press the player at once.
+        // An unlimited gang-grapple out-muscles the planted stance so hard
+        // that any surround is an automatic loss; the rest loiter just outside
+        // the scrum waiting for an opening.
+        fighters.sort((a, b) => a.length - b.length);
+        for (const [rank, fighter] of fighters.entries()) {
+          const { bot, length, dx, dz } = fighter;
+          if (length < 1.2) {
+            if (rank < 2) {
+              // In grapple range: bulldoze radially outward, through the
+              // player toward the nearest rim — a sumo push-out, not a pile.
+              const playerR = Math.hypot(playerPos[0], playerPos[2]);
+              let pushX = dx / length;
+              let pushZ = dz / length;
+              if (playerR > 0.2) {
+                pushX = pushX * 0.35 + (playerPos[0] / playerR) * 0.65;
+                pushZ = pushZ * 0.35 + (playerPos[2] / playerR) * 0.65;
+                const norm = Math.hypot(pushX, pushZ);
+                pushX /= norm;
+                pushZ /= norm;
+              }
+              driveWrestler(bot.wrestler, pushX, pushZ, aggression * bot.wrestler.mass * 1.15);
+            } else {
+              brakeWrestler(bot.wrestler, 3);
+            }
+          } else if (rank < 2 || length > 2.4) {
+            const botPelvis = bot.wrestler.bones[BONE_PELVIS];
             const velocity = ctx.world.getBodyVelocity(botPelvis.body);
             const along = (velocity.linear[0] * dx + velocity.linear[2] * dz) / length;
-            const headroom = Math.max(0, 1 - along / 3.6);
+            const headroom = Math.min(1.2, Math.max(0, 1 - along / 3.6));
             const force = aggression * bot.wrestler.mass * headroom;
             driveWrestler(bot.wrestler, dx / length, dz / length, force);
+          } else {
+            // Off-ticket and close: hover at the edge of the scrum.
+            brakeWrestler(bot.wrestler, 3);
           }
         }
 
-        if (state === "active" && activeCount === 0) {
+        if ((state === "active" || state === "countdown") && activeCount === 0) {
           state = wave >= MAX_WAVES ? "won" : "intermission";
           stateTimer = 1.4;
+        } else if (state === "countdown") {
+          stateTimer -= delta;
+          if (stateTimer <= 0) {
+            state = "active";
+            fightFlash = 0.9;
+          }
         } else if (state === "intermission") {
           stateTimer -= delta;
           if (stateTimer <= 0) {
-            startWave(wave + 1);
+            startWave(nextWave);
           }
+        }
+
+        fightFlash = Math.max(0, fightFlash - delta);
+        if (state === "countdown") {
+          setBanner(`${Math.ceil(stateTimer)}`, "#3affd8");
+        } else if (state === "active" && fightFlash > 0) {
+          setBanner("FIGHT!", "#ff3f8e");
+        } else if (state === "won") {
+          setBanner("VICTORY 🏆", "#3affd8");
+        } else {
+          setBanner("");
         }
       },
       metrics: () => ({
         Wave: state === "won" ? `Cleared ${MAX_WAVES}/${MAX_WAVES} 🏆` : `${wave}/${MAX_WAVES}`,
+        Round:
+          state === "countdown"
+            ? `${Math.ceil(stateTimer)}…`
+            : state === "active"
+              ? "Fight!"
+              : state === "won"
+                ? "Victory"
+                : "Get ready",
         Bots: activeCount,
         "Ring-outs": knockouts,
         Falls: falls,
@@ -484,6 +760,7 @@ export const sumorumbleScenario: ScenarioDefinition = {
       dispose: () => {
         window.removeEventListener("keydown", onKeyDown);
         window.removeEventListener("keyup", onKeyUp);
+        banner.remove();
       }
     };
   }

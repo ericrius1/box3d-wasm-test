@@ -3,6 +3,7 @@ import { landingLabScenario } from "./landing-lab";
 import { castlesiegeScenario } from "./castle-siege";
 import { zeropointScenario } from "./zero-point";
 import { sumorumbleScenario } from "./sumo-rumble";
+import { windgardenScenario } from "./wind-garden";
 import { stackfallScenario } from "./stackfall";
 import { wreckingballScenario } from "./wrecking-ball";
 import { bowlinglaneScenario } from "./bowling-lane";
@@ -28,6 +29,7 @@ export const exampleScenarios = [
   castlesiegeScenario,
   zeropointScenario,
   sumorumbleScenario,
+  windgardenScenario,
   landingLabScenario,
   stackfallScenario,
   wreckingballScenario,
